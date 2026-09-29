@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from nystrom_attention import NystromAttention
+import warnings
 
 class BilinearFusion(nn.Module):
     r"""
@@ -369,20 +370,60 @@ class WSITargetPoolingHead(nn.Module):
         return self.proj(pooled)
 
 
+def parse_alphapgc(alphapgc):
+    if alphapgc is None:
+        raise ValueError("alphafix requires alphapgc weights for pathology,gene,clinic, e.g. 0.5,0.3,0.2")
+    if isinstance(alphapgc, str):
+        parts = [part.strip() for part in alphapgc.split(",")]
+    else:
+        parts = list(alphapgc)
+    if len(parts) != 3:
+        raise ValueError(
+            f"alphapgc must have 3 comma-separated weights for pathology,gene,clinic, got `{alphapgc}`."
+        )
+    try:
+        weights = [float(part) for part in parts]
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"alphapgc must be 3 numeric weights for pathology,gene,clinic, got `{alphapgc}`."
+        ) from exc
+    if any(weight < 0 for weight in weights):
+        raise ValueError(f"alphapgc weights must be non-negative, got `{alphapgc}`.")
+    total = sum(weights)
+    if total <= 0:
+        raise ValueError(f"alphapgc weights must sum to a positive value, got `{alphapgc}`.")
+    return [weight / total for weight in weights]
+
+
 class GeneralizedPoE(nn.Module):
-    def __init__(self, num_modalities=3):
+    def __init__(self, num_modalities=3, alphafix=False, alphapgc=None):
         super().__init__()
-        self.modality_logits = nn.Parameter(torch.zeros(num_modalities))
+        self.num_modalities = num_modalities
+        self.alphafix = bool(alphafix)
+        if self.alphafix:
+            weights = torch.tensor(parse_alphapgc(alphapgc), dtype=torch.float32)
+            if weights.numel() != num_modalities:
+                raise ValueError("alphapgc must match the number of PoE modalities.")
+            self.register_buffer("fixed_alpha", weights)
+        else:
+            self.modality_logits = nn.Parameter(torch.zeros(num_modalities))
 
     def forward(self, mus, logvars, available_mask):
         precision_terms = [torch.exp(-logvar.clamp(min=-4.0, max=2.0)) for logvar in logvars]
         stacked_mu = torch.stack(mus, dim=1)
         stacked_tau = torch.stack(precision_terms, dim=1)
 
-        logits = self.modality_logits.unsqueeze(0).expand(available_mask.shape[0], -1)
-        logits = logits.masked_fill(~available_mask, float("-inf"))
-        weights = torch.softmax(logits, dim=1)
-        weights = torch.where(available_mask, weights, torch.zeros_like(weights))
+        if self.alphafix:
+            weights = self.fixed_alpha.to(dtype=stacked_mu.dtype, device=stacked_mu.device)
+            weights = weights.unsqueeze(0).expand(available_mask.shape[0], -1)
+            weights = torch.where(available_mask, weights, torch.zeros_like(weights))
+            weight_sum = weights.sum(dim=1, keepdim=True)
+            weights = torch.where(weight_sum > 0, weights / weight_sum.clamp_min(1e-12), weights)
+        else:
+            logits = self.modality_logits.unsqueeze(0).expand(available_mask.shape[0], -1)
+            logits = logits.masked_fill(~available_mask, float("-inf"))
+            weights = torch.softmax(logits, dim=1)
+            weights = torch.where(available_mask, weights, torch.zeros_like(weights))
 
         weighted_tau = weights.unsqueeze(-1) * stacked_tau
         tau_joint = 1.0 + weighted_tau.sum(dim=1)
@@ -420,25 +461,32 @@ class ReconstructionLoss(nn.Module):
             name: nn.Parameter(torch.zeros(1)) for name in dims
         })
 
-    def forward(self, recon_dict, target_dict, available_mask):
+    def forward(self, recon_dict, target_dict, available_mask=None):
+        # available_mask is kept for call-site compatibility; reconstruction ignores it.
         losses = {}
-        total = 0.0
-        for idx, (name, dim) in enumerate(self.dims.items()):
-            sample_mask = available_mask[:, idx]
-            if sample_mask.sum() == 0:
-                losses[name] = recon_dict[name].sum() * 0.0
+        total = None
+        for name in self.dims:
+            recon = recon_dict[name]
+            target = target_dict[name]
+            count = int(recon.shape[0])
+            losses[f"counts_{name}"] = count
+            if count == 0:
+                losses[name] = recon.new_tensor(float("nan"))
                 continue
 
-            recon = recon_dict[name][sample_mask]
-            target = target_dict[name][sample_mask]
-            mse = F.mse_loss(recon, target, reduction="none").mean(dim=1)
+            recon_flat = recon.reshape(count, -1)
+            target_flat = target.reshape(count, -1)
+            mse = F.mse_loss(recon_flat, target_flat, reduction="none").mean(dim=1)
             logvar = self.logvars[name].clamp(min=-4.0, max=4.0)
             sigma2 = torch.exp(logvar)
             loss = mse / (2.0 * sigma2) + 0.5 * logvar
             loss = loss.mean()
             losses[name] = loss
-            total = total + loss
+            total = loss if total is None else total + loss
 
+        if total is None:
+            ref = next(iter(recon_dict.values()))
+            total = ref.new_tensor(0.0)
         losses["total"] = total
         return losses
 
@@ -449,3 +497,189 @@ class JeffreysDivergence(nn.Module):
         inv_sigma2 = torch.reciprocal(sigma2)
         value = 0.5 * (sigma2 + inv_sigma2 - 2.0 + mu.pow(2) * (1.0 + inv_sigma2))
         return value.mean(dim=1).mean()
+
+
+class KLDivergence(nn.Module):
+    def forward(self, mu, logvar):
+        logvar = logvar.clamp(min=-4.0, max=2.0)
+        sigma2 = torch.exp(logvar)
+        value = 0.5 * (mu.pow(2) + sigma2 - 1.0 - logvar)
+        return value.mean(dim=1).mean()
+
+
+PATTERNS = (1, 2, 3, 4, 5, 6, 7)
+PATTERN_NAMES = {
+    1: "P",
+    2: "G",
+    3: "PG",
+    4: "C",
+    5: "PC",
+    6: "GC",
+    7: "PGC",
+}
+MIN_BATCH_FOR_COX = 8
+
+
+def as_pattern_ids(pattern_id, batch_size, device):
+    if not torch.is_tensor(pattern_id):
+        pattern_id = torch.as_tensor(pattern_id, device=device)
+    pattern_id = pattern_id.to(device=device, dtype=torch.long)
+    if pattern_id.ndim == 0:
+        pattern_id = pattern_id.expand(int(batch_size))
+    else:
+        pattern_id = pattern_id.reshape(-1)
+        if pattern_id.numel() == 1 and int(batch_size) > 1:
+            pattern_id = pattern_id.reshape(()).expand(int(batch_size))
+    pattern_id = pattern_id.reshape(-1)
+    if int(pattern_id.numel()) != int(batch_size):
+        raise ValueError(
+            f"pattern_id has {pattern_id.numel()} values, expected batch_size={batch_size}."
+        )
+    return pattern_id
+
+
+def pattern_to_mask(pattern_id, device=None, dtype=torch.bool):
+    pid = int(pattern_id)
+    bits = [(pid >> 0) & 1, (pid >> 1) & 1, (pid >> 2) & 1]
+    return torch.tensor(bits, dtype=dtype, device=device)
+
+
+def bits_to_id(avail_mask):
+    bits = avail_mask.to(dtype=torch.long)
+    return bits[:, 0] + 2 * bits[:, 1] + 4 * bits[:, 2]
+
+
+def _expand_avail(avail_mask, like):
+    return avail_mask.to(device=like.device, dtype=torch.bool).view(-1, *([1] * (like.ndim - 1)))
+
+
+def refill_missing_modalities(
+    wsi_tokens,
+    gene_tokens,
+    clinic_tokens,
+    recon_wsi,
+    recon_gene,
+    recon_clinic,
+    available_mask,
+):
+    recon_wsi = recon_wsi.reshape(wsi_tokens.shape)
+    recon_gene = recon_gene.reshape(gene_tokens.shape)
+    recon_clinic = recon_clinic.reshape(clinic_tokens.shape)
+    wsi_tokens_2 = torch.where(_expand_avail(available_mask[:, 0], wsi_tokens), wsi_tokens, recon_wsi)
+    gene_tokens_2 = torch.where(_expand_avail(available_mask[:, 1], gene_tokens), gene_tokens, recon_gene)
+    clinic_tokens_2 = torch.where(
+        _expand_avail(available_mask[:, 2], clinic_tokens),
+        clinic_tokens,
+        recon_clinic,
+    )
+    return wsi_tokens_2, gene_tokens_2, clinic_tokens_2
+
+
+class MultiPatternHead(nn.Module):
+    def __init__(self, d_z=128, mmhid=256, dropout=0.1, label_dim=1):
+        super().__init__()
+        self.fuse_fc = nn.ModuleDict({
+            str(s): nn.Sequential(
+                nn.Linear(d_z, mmhid), nn.ReLU(), nn.Dropout(dropout),
+                nn.Linear(mmhid, mmhid), nn.ReLU(), nn.Dropout(dropout),
+            ) for s in range(1, 8)
+        })
+        self.classifier = nn.Linear(mmhid, label_dim)
+
+    def forward(self, mu_joint, pattern_id):
+        pattern_id = as_pattern_ids(pattern_id, mu_joint.size(0), mu_joint.device)
+        risk = mu_joint.new_zeros(mu_joint.size(0), self.classifier.out_features)
+        for s in pattern_id.unique().tolist():
+            sel = pattern_id == int(s)
+            fused = self.fuse_fc[str(int(s))](mu_joint[sel])
+            risk[sel] = self.classifier(fused)
+        return risk
+
+
+class FiLMHead(nn.Module):
+    def __init__(self, d_z=128, mmhid=256, emb_dim=32, dropout=0.1, label_dim=1):
+        super().__init__()
+        self.emb = nn.Embedding(8, emb_dim)
+        self.film = nn.Linear(emb_dim, 2 * d_z)
+        self.fuse_fc = nn.Sequential(
+            nn.Linear(d_z, mmhid), nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(mmhid, mmhid), nn.ReLU(), nn.Dropout(dropout),
+        )
+        self.classifier = nn.Linear(mmhid, label_dim)
+        nn.init.zeros_(self.film.weight)
+        nn.init.zeros_(self.film.bias)
+
+    def forward(self, mu_joint, pattern_id):
+        pattern_id = as_pattern_ids(pattern_id, mu_joint.size(0), mu_joint.device)
+        e = self.emb(pattern_id)
+        gamma, beta = self.film(e).chunk(2, dim=-1)
+        z = (1.0 + gamma) * mu_joint + beta
+        return self.classifier(self.fuse_fc(z))
+
+
+def multi_pattern_surv_step(
+    mu_list,
+    logvar_list,
+    avail_real,
+    poe,
+    head,
+    event_time,
+    censor,
+    pattern_weights=None,
+    min_batch_for_cox=MIN_BATCH_FOR_COX,
+    loss_fn=None,
+    stop_grad_poe=False,
+):
+    if loss_fn is None:
+        from utils.loss_func import CoxSurvLoss
+        loss_fn = CoxSurvLoss()
+    if pattern_weights is None:
+        pattern_weights = {s: 1.0 / float(len(PATTERNS)) for s in PATTERNS}
+
+    device = mu_list[0].device
+    batch_size = mu_list[0].shape[0]
+    avail_real = avail_real.to(device=device, dtype=torch.bool)
+    event_time = event_time.to(device=device)
+    censor = censor.to(device=device)
+
+    loss_surv = mu_list[0].new_tensor(0.0)
+    risks = {}
+    n_patterns = 0
+    for s in PATTERNS:
+        pm = pattern_to_mask(s, device=device)
+        sel = (avail_real >= pm.unsqueeze(0)).all(dim=1)
+        if int(sel.sum()) < int(min_batch_for_cox):
+            continue
+        mask_s = pm.unsqueeze(0).expand(batch_size, -1)[sel]
+        if stop_grad_poe:
+            # L_surv 不回传 Encoder / PoE alpha：联合后验只作为常量化输入给读出层
+            with torch.no_grad():
+                mu_s, logvar_s, _ = poe(
+                    [mu[sel] for mu in mu_list],
+                    [lv[sel] for lv in logvar_list],
+                    mask_s,
+                )
+        else:
+            mu_s, logvar_s, _ = poe(
+                [mu[sel] for mu in mu_list],
+                [lv[sel] for lv in logvar_list],
+                mask_s,
+            )
+        risk_s = head(mu_s, pattern_id=s)
+        loss_s = loss_fn(h=risk_s, t=event_time[sel], c=censor[sel])
+        weight = float(pattern_weights[s])
+        loss_surv = loss_surv + weight * loss_s
+        risks[int(s)] = risk_s
+        n_patterns += 1
+
+    if n_patterns == 0:
+        warnings.warn(
+            "multi_pattern_surv_step skipped all 7 patterns because each subset had "
+            f"fewer than {min_batch_for_cox} samples.",
+            stacklevel=2,
+        )
+    return {
+        "loss": loss_surv,
+        "risks": risks,
+        "n_patterns": n_patterns,
+    }

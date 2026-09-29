@@ -14,3 +14,4 @@
   - `TCGA-KICH`
 - notes:
   - 与 `tcga_kirc`、`tcga_kirp` 共享同一原始根目录
+  - 与 `tcga_kirc`、`tcga_kirp` 共享 WSI 源目录 `TCGA-KICH-KIRC-KIRP`，Workspace 按 `TCGA-KICH_patients.csv` 过滤

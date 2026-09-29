@@ -12,3 +12,5 @@
   - `clinical/`
 - project_filter:
   - `TCGA-KIRC`
+- notes:
+  - 与 `tcga_kich`、`tcga_kirp` 共享 WSI 源目录 `TCGA-KICH-KIRC-KIRP`，Workspace 按 `TCGA-KIRC_patients.csv` 过滤

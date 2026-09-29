@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from itertools import combinations
+from pathlib import Path
 from typing import Iterable
 
 import torch
@@ -12,6 +13,26 @@ from utils.loss_func import CoxSurvLoss
 
 
 MODALITY_NAMES = ("wsi", "gene", "clinic")
+SUBSET_TO_MODALITIES = {
+    "P": ("wsi",),
+    "C": ("clinic",),
+    "G": ("gene",),
+    "PC": ("wsi", "clinic"),
+    "PG": ("wsi", "gene"),
+    "CG": ("gene", "clinic"),
+    "PCG": ("wsi", "gene", "clinic"),
+}
+MODALITY_TO_LETTER = {"wsi": "P", "gene": "G", "clinic": "C"}
+ALL_EVAL_SUBSETS = tuple(SUBSET_TO_MODALITIES.keys())
+HGCN_SUBSET_TO_USE_TYPE = {
+    "P": ["img"],
+    "C": ["cli"],
+    "G": ["rna"],
+    "PC": ["img", "cli"],
+    "PG": ["img", "rna"],
+    "CG": ["rna", "cli"],
+    "PCG": ["img", "rna", "cli"],
+}
 
 
 def as_bool_tensor(value, *, device: torch.device) -> torch.Tensor:
@@ -90,6 +111,135 @@ def all_nonempty_subsets(items: Iterable[str]) -> list[tuple[str, ...]]:
     for r in range(1, len(names) + 1):
         subsets.extend(combinations(names, r))
     return subsets
+
+
+
+def _canonical_subset_name(keep):
+    if isinstance(keep, str):
+        raw = keep.strip()
+        upper = raw.upper().replace(" ", "")
+        if upper in SUBSET_TO_MODALITIES:
+            return upper
+        names = tuple(token.strip().lower() for token in raw.replace(";", ",").split(",") if token.strip())
+    else:
+        names = tuple(str(name).strip().lower() for name in keep)
+    letters = []
+    seen = set()
+    for name in names:
+        letter = MODALITY_TO_LETTER.get(name)
+        if letter is None:
+            raise ValueError(f"Unsupported eval modality `{name}`. Expected wsi/gene/clinic or P/C/G subsets.")
+        if letter not in seen:
+            letters.append(letter)
+            seen.add(letter)
+    tag = "".join(sorted(letters, key=lambda item: "PCG".index(item)))
+    if tag not in SUBSET_TO_MODALITIES:
+        raise ValueError(f"Unsupported eval subset `{keep}`.")
+    return tag
+
+
+def parse_eval_modalities(raw):
+    text = "off" if raw is None else str(raw).strip()
+    if not text or text.lower() in {"off", "none", "false", "0"}:
+        return ()
+    if text.lower() == "all":
+        return ALL_EVAL_SUBSETS
+    tokens = [token.strip() for token in text.replace(";", ",").split(",") if token.strip()]
+    if tokens and all(token.upper() in SUBSET_TO_MODALITIES for token in tokens):
+        subsets = []
+        seen = set()
+        for token in tokens:
+            name = token.upper()
+            if name not in seen:
+                subsets.append(name)
+                seen.add(name)
+        return tuple(subsets)
+    return (_canonical_subset_name(text),)
+
+
+def subset_keep_modalities(subset):
+    return SUBSET_TO_MODALITIES[_canonical_subset_name(subset)]
+
+
+def complete_avail_like(avail):
+    if avail is None:
+        raise ValueError("Expected `avail` to build a complete evaluation mask.")
+    complete = {}
+    for name in MODALITY_NAMES:
+        if name not in avail:
+            raise KeyError(f"Missing availability key `{name}`.")
+        value = avail[name]
+        if torch.is_tensor(value):
+            complete[name] = torch.ones_like(value, dtype=torch.bool)
+        else:
+            complete[name] = True
+    return complete
+
+
+def apply_eval_subset(avail, subset):
+    keep = set(subset_keep_modalities(subset))
+    base = complete_avail_like(avail)
+    restricted = {}
+    for name in MODALITY_NAMES:
+        value = base[name]
+        if torch.is_tensor(value):
+            restricted[name] = value.to(dtype=torch.bool) & (name in keep)
+        else:
+            restricted[name] = bool(value) and name in keep
+    return restricted
+
+
+def subset_result_dir(results_dir, subset):
+    return Path(results_dir) / "eval_subsets" / _canonical_subset_name(subset)
+
+
+def subset_summary_path(results_dir):
+    return Path(results_dir) / "eval_subsets" / "summary_long.csv"
+
+
+def hgcn_use_type_for_subset(subset):
+    return list(HGCN_SUBSET_TO_USE_TYPE[_canonical_subset_name(subset)])
+
+
+def eval_subset_metric_row(fold, subset, test_cindex, test_cindex_ipcw=0.0, test_IBS=0.0, test_iauc=0.0, test_iauc_list=0.0, test_loss=0.0, test_BS=0.0):
+    return {
+        "fold": int(fold),
+        "subset": _canonical_subset_name(subset),
+        "test_cindex": test_cindex,
+        "test_cindex_ipcw": test_cindex_ipcw,
+        "test_IBS": test_IBS,
+        "test_iauc": test_iauc,
+        "test_iauc_list": test_iauc_list,
+        "test_loss": test_loss,
+        "test_BS": test_BS,
+    }
+
+
+
+def write_eval_subset_outputs(results_dir, rows):
+    import pandas as pd
+
+    if not rows:
+        return None
+    results_dir = Path(results_dir)
+    df = pd.DataFrame(rows)
+    required = ["fold", "subset", "test_cindex", "test_cindex_ipcw", "test_IBS", "test_iauc", "test_iauc_list", "test_loss", "test_BS"]
+    missing = [name for name in required if name not in df.columns]
+    if missing:
+        raise ValueError(f"eval subset rows missing columns: {missing}")
+    df = df[required].copy()
+    df["subset"] = [ _canonical_subset_name(value) for value in df["subset"] ]
+    df = df.sort_values(["subset", "fold"]).reset_index(drop=True)
+    summary_path = subset_summary_path(results_dir)
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(summary_path, index=False)
+    metric_cols = ["test_cindex", "test_cindex_ipcw", "test_IBS", "test_iauc", "test_iauc_list", "test_loss", "test_BS"]
+    for subset, group in df.groupby("subset", sort=False):
+        subset_df = group.sort_values("fold")[metric_cols].reset_index(drop=True)
+        out_dir = subset_result_dir(results_dir, subset)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        subset_df.to_csv(out_dir / "test_result.csv")
+    return summary_path
 
 
 def moment_match_gaussian(mus: list[torch.Tensor], logvars: list[torch.Tensor]) -> tuple[torch.Tensor, torch.Tensor]:

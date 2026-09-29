@@ -12,8 +12,7 @@
 
 ---
 
-## 1. 数据与输入维度
-
+c
 | 模态 | 特征提取器 | 输入维度 | 备注 |
 |---|---|---|---|
 | WSI | UNI 1 | `(n_patch, 1024)` | `n_patch` 逐病人变化 |
@@ -132,8 +131,11 @@ WSI 编码器改为两段级联结构。第一段使用 WSI 专属的 MIL Resamp
 ```
 先验专家: μ0 = 0, τ0 = 1（固定，不参与 softmax，始终存在）
 
-模态专家权重: 每个模态 i 有一个可学习 logit a_i
+模态专家权重: 默认每个模态 i 有一个可学习 logit a_i
 α_i = softmax(a_1, a_2, a_3)_i   # 仅在该模态可用时参与 softmax
+
+`--alphafix` 打开后不再学习 a_i，改为使用 `--alphapgc pathology,gene,clinic` 给出的固定权重。
+该三元组会先归一化到和为 1；缺失 / dropout 掉的模态权重置 0 后，再在当前可用子集上重新归一化。
 
 τ_i = 1 / exp(logσ²_i)  (即 1/σ_i²)
 
@@ -204,10 +206,16 @@ logσ²（各专家及 joint）均需 clamp 到 [-4, 2]。
 ```
 L = L_rec + β(t) * J
 
+默认:
 β(t): 前 N_warmup 个 epoch 从 0 线性升到目标值 β_target，之后保持不变
+
+--betafix 打开后:
+β(t) = β_target，全程固定，不再做 warm-up
 ```
 
 （β_target 和 N_warmup 作为超参，具体数值留待调参，不在本设计文档中固定。）
+需要固定参数 β 时，打开参数开关 `--betafix` 只固定 Jeffreys 的 β，不影响学习率 scheduler 的 `--warmup_epochs`。
+需要固定 PoE 模态权重 α 时，打开 `--alphafix` 并同时给出 `--alphapgc pathology,gene,clinic`，例如 `--alphapgc 0.5,0.3,0.2`。`--alphafix` 只固定 α，不影响 β warmup，也不影响学习率 scheduler。
 
 当前这套重建损失与 Jeffreys 缩放是共享实现，因此会自动作用于所有会计算 VAE 损失的训练阶段：Model_A 的 stage1、Model_B 的 stage1，以及 Model_C 的联合训练中的 VAE 部分。
 
@@ -242,7 +250,9 @@ L = L_rec + β(t) * J
 
 ### 8.3 Model_B（后续）
 - 复用 Model_A 训练好的 Enc/PoE 权重作为初始化，不冻结
-- Encoder 学习率 = head 学习率 × 0.1
+- Encoder 学习率 = head 学习率 × `poe_encoder_lr_ratio`（默认 0.1）
+  - `--lr` 为 survival head（`fuse_fc + classifier`）学习率
+  - encoder / PoE / decoder 使用 `--lr * poe_encoder_lr_ratio`
 - 下游 head 换成已有工作的生存预测 head（复用实现，接口见第 9 节）
 
 ### 8.4 Model_C（后续）
@@ -318,7 +328,7 @@ Model_A 的线性探针 head 除外——那是一个单独的、极简的线性
 
 - `z/mean_norm` 为 batch 内 `mu_joint` 的平均 L2 norm
 - `z/mean_std` 为 batch 内 `z_joint` 各维度方差的均值
-- `poe/alpha_*` 为 PoE 权重 softmax 后的 batch 平均值
+- `poe/alpha_*` 为 PoE 权重 softmax 后的 batch 平均值；`--alphafix` 打开后则为 `--alphapgc` 在当前可用模态上重新归一化后的值
 
 ### 11.3 生存监控
 
@@ -408,7 +418,7 @@ CUDA_VISIBLE_DEVICES=3 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.
 ```bash
 cd /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init
 
-CUDA_VISIBLE_DEVICES=5 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
+CUDA_VISIBLE_DEVICES=2 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
   --study tcga_lihc \
   --modality survtri_poe_vae \
   --poe_variant B \
@@ -429,7 +439,9 @@ CUDA_VISIBLE_DEVICES=5 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.
   --wandb_mode online \
   --wandb_project SurvPGC_MultiVAE \
   --exp_group poe_vae_test \
-  --run_name model_B_DropTest2
+  --alphafix \
+  --alphapgc 1,1,1 \
+  --run_name model_B_alphafixed
 ```
 
 ### 12.3 Model_C：联合训练 `L_rec + βJ + λL_surv`
@@ -499,6 +511,12 @@ CUDA_VISIBLE_DEVICES=5 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.
   --wandb_project SurvPGC_MultiVAE \
 第一次用这个环境时执行：
 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python -m wandb login
+- 固定参数 beta ：
+--betafix \
+--poe_beta_target 0.25 \
+- 固定 PoE alpha ：
+--alphafix \
+--alphapgc 0.5,0.3,0.2 \
 
 ## 13. Optuna 调参体系
 
@@ -520,17 +538,22 @@ WandB 只负责过程记录与可视化。
 - 目标值统一为：
   `single` 模式：单折 `best val c-index`
   `mean_cv` 模式：多折 `mean(best val c-index)`
+- Stage2 选点与主训练相同：`survtri_poe_vae` 默认从 `epoch >= 10` 起按验证 C-index 保存 checkpoint，Optuna 不再把 `save_best_from_epoch` 强制设为 `0`
 - 每个 epoch 结束后执行：
   `wandb.log(...) -> trial.report(val_cindex, step=global_epoch_step) -> pruning 判断`
 
 ### 13.1 各组调参空间
 
 - Model_A：
-  `lr`、`lr_stage1`、`reg`、`poe_beta_target`、`poe_modality_dropout`
+  `lr`、`lr_stage1`、`reg`、`poe_beta_target`、`poe_modality_dropout`、`alphapgc`
 - Model_B：
-  `lr`、`lr_stage1`、`reg`、`poe_beta_target`、`poe_modality_dropout`、`poe_mmhid`、`poe_decoder_hidden_dim`
+  `lr ∈ [1e-5, 1e-3]`、`lr_stage1 ∈ [5e-5, 5e-4]`、`reg ∈ [1e-5, 1e-3]`、`poe_beta_target ∈ [0.01, 0.5]`、`poe_modality_dropout ∈ [0.0, 0.4]`、`poe_mmhid ∈ {128, 256}`、`poe_decoder_hidden_dim ∈ {256, 512}`、`poe_encoder_lr_ratio ∈ {0.01, 0.1, 1, 10}`、`alphapgc`
 - Model_C：
-  `lr`、`reg`、`poe_surv_lambda`、`poe_beta_target`、`poe_modality_dropout`
+  `lr ∈ [5e-5, 7e-4]`、`reg ∈ [1e-5, 1e-3]`、`poe_surv_lambda ∈ [0.05, 2.0]`、`poe_beta_target ∈ [0.02, 1.0]`、`poe_modality_dropout ∈ [0.0, 0.4]`、`alphapgc`
+  `batch_size` 不在搜索空间内，继承命令行 `--batch_size`（Table1 Model C 固定为 16）
+
+`--betafix` 不是搜索变量，而是从命令行继承到每个 trial。打开后，Optuna 采样到的 `poe_beta_target` 会作为固定 β 使用，不再走 warm-up。默认 study 名会带 `_betafix` 后缀，避免和旧的 warm-up study 共用同一个 sqlite 库。
+A/B/C 都会搜索固定 PoE alpha：每个 trial 采样 `alphapgc_pathology ∈ [0.45, 0.75]`、`alphapgc_gene ∈ [0.05, 0.20]`、`alphapgc_clinic ∈ [0.20, 0.40]`，L1 归一化后写成 `--alphapgc p,g,c`，并强制 `--alphafix`。CLI 仍接受原始权重（如 `1,1,1`），不改成必须百分比。默认 study 名带 `_alphafix_search` 后缀，避免和学习 α、或 CLI 固定某一组 α 的旧 study 共用同一个 sqlite 库。
 
 ### 13.2 采样与剪枝策略
 
@@ -538,8 +561,15 @@ WandB 只负责过程记录与可视化。
   当前支持 `TPE` 与 `Random`，默认 `TPE`
 - pruner：
   当前支持 `MedianPruner` 与关闭剪枝，默认 `MedianPruner`
-- pruning 触发位置：
-  每个 epoch 验证结束后，依据 `val_c-index` 执行
+- 多数据集扫描：
+  `--optuna_studies kirp,lihc,coad,kirc,brca` 决定一个 trial 的数据集顺序。不传则退回单库 `--study`
+  每个数据集仍按 `mean_cv` 跑 5 折，共 25 组。路径由 `infer_standard_paths()` 绑定为 `P/uni_v1`、`C/L0`、`G/scFoundation_embedding_cell_norm`
+- objective：
+  `mean(5 个数据集的 5-fold mean val C-index)`。这个总均值只用于选参，不做阈值校验
+- 硬阈值剪枝：
+  某个数据集 5 折结束后，若该数据集 mean val C-index 低于 `utils/optuna_utils.py` 里的 `OPTUNA_STUDY_MIN_CINDEX[study]`，立刻 `TrialPruned`，后续数据集不再跑。改阈值只改这个字典，没有 CLI flag
+- epoch 级 MedianPruner 仍保留：
+  每个 epoch 验证后 `trial.report(val_cindex, step)`。`step = study_idx * k * max_epochs + fold_idx * max_epochs + epoch`
 - `single` 模式：
   使用 `--optuna_fold` 指定单折
 - `mean_cv` 模式：
@@ -548,9 +578,9 @@ WandB 只负责过程记录与可视化。
   `--k_start`
   `--k_end`
   推导 folds，并返回其验证集 `c-index` 均值
-- 在 `mean_cv` 模式下，pruning 的 `step` 使用“fold 展开的全局 epoch 步数”
 - 当前推荐设置：
   `--optuna_trials 10`
+  `--optuna_studies kirp,lihc,coad,kirc,brca`
   `--optuna_fold_mode mean_cv`
   `--optuna_sampler tpe`
   `--optuna_pruner median`
@@ -598,7 +628,33 @@ CUDA_VISIBLE_DEVICES=1 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main_
   --run_name lihc_poeA
 ```
 
-### 13.5 Model_B Optuna 运行示例
+### 13.5 五数据集 Optuna 运行示例
+
+```bash
+cd /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init
+
+CUDA_VISIBLE_DEVICES=6 bash bg_tune.sh gpu6_optunaB.log \
+  --optuna_studies kirp,lihc,coad,kirc,brca \
+  --modality survtri_poe_vae \
+  --poe_variant B \
+  --betafix \
+  --optuna_fold_mode mean_cv \
+  --optuna_pruner median \
+  --optuna_n_startup_trials 5 \
+  --optuna_trials 15 \
+  --bag_loss cox_surv \
+  --label_dim 1 \
+  --max_epochs_stage1 10 \
+  --max_epochs 25 \
+  --warmup_epochs 3 \
+  --k 5 \
+  --batch_size 128 \
+  --wandb_mode online \
+  --wandb_project POE_MODELB_TUNE
+
+```
+
+### 13.6 Model_B Optuna 运行示例
 
 ```bash
 cd /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init
@@ -620,6 +676,7 @@ CUDA_VISIBLE_DEVICES=6 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main_
   --max_epochs_stage1 5 \
   --max_epochs 20 \
   --warmup_epochs 3 \
+  --betafix \
   --batch_size 128 \
   --batch_size_stage1 128 \
   --wandb_mode online \
@@ -629,7 +686,7 @@ CUDA_VISIBLE_DEVICES=6 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main_
   --run_name lihc_poeB
 ```
 
-### 13.6 Model_C Optuna 运行示例
+### 13.7 Model_C Optuna 运行示例
 
 ```bash
 cd /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init
@@ -650,6 +707,7 @@ CUDA_VISIBLE_DEVICES=3 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main_
   --optuna_trials 10 \
   --max_epochs 20 \
   --warmup_epochs 3 \
+  --betafix \
   --batch_size 128 \
   --batch_size_stage1 128 \
   --wandb_mode online \
@@ -666,8 +724,23 @@ CUDA_VISIBLE_DEVICES=3 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main_
 --optuna_fold 1
 ```
 
-### 13.7 当前限制
+后台启动不走 `configs/queue`，直接用仓库根目录的 `bg_tune.sh`：
+
+```bash
+CUDA_VISIBLE_DEVICES=6 bash bg_tune.sh gpu6_optunaB.log \
+  --study tcga_lihc \
+  --modality survtri_poe_vae \
+  --poe_variant B \
+  --betafix \
+  --bag_loss cox_surv \
+  --label_dim 1 \
+  --optuna_fold_mode mean_cv \
+  --optuna_trials 10
+```
+
+### 13.8 当前限制
 
 - 当前 `mean_cv` 模式按 fold 顺序串行训练，计算开销显著高于 `single` 模式
 - 当前 Optuna 入口仅面向 `survtri_poe_vae`
 - 目标函数固定使用验证集 `c-index`，不直接使用测试集指标
+- Model C 的 stage2 `batch_size` 不搜索；旧 study 若仍采样过 `batch_size`，不能直接与当前协议混比

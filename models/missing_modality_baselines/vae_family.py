@@ -1,7 +1,3 @@
-# DEVIATION:
-# - This wrapper keeps the original third_party/MultiVae MVAE / MoPoE mechanisms.
-# - Only frozen-feature preprocessing and the Cox survival head are added here.
-
 from __future__ import annotations
 
 import sys
@@ -33,6 +29,22 @@ def _flatten_if_needed(x: torch.Tensor) -> torch.Tensor:
     if x.dim() == 1:
         return x.unsqueeze(0)
     return x.reshape(x.shape[0], -1)
+
+
+def _get_joint_latent_params(model, inputs):
+    """Return joint posterior parameters across MultiVae model variants."""
+    if hasattr(model, "inference"):
+        return model.inference(inputs)["joint"]
+
+    # This vendored MVAE exposes the joint posterior through this method
+    # instead of the inference() API used by MoPoE.
+    if hasattr(model, "compute_mu_log_var_subset"):
+        return model.compute_mu_log_var_subset(inputs, list(model.encoders.keys()))
+
+    raise AttributeError(
+        f"{type(model).__name__} exposes neither inference() nor "
+        "compute_mu_log_var_subset()."
+    )
 
 
 class _SurvivalMultiVAEBase(nn.Module):
@@ -165,8 +177,7 @@ class _SurvivalMultiVAEBase(nn.Module):
 
         inputs, _ = self._build_dataset(x_path, x_omic, x_clinic, avail, wsi_mask=wsi_mask)
         vae_out = self.model(inputs, epoch=epoch, batch_ratio=batch_ratio)
-        latents = self.model.inference(inputs)
-        joint_mu, joint_logvar = latents["joint"]
+        joint_mu, joint_logvar = _get_joint_latent_params(self.model, inputs)
         z = reparameterize(joint_mu, joint_logvar, sample=self.training)
         risk = self.cox_head(z)
 

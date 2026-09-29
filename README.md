@@ -55,7 +55,7 @@ More visualization results, including heatmaps and top patches, are available at
 
 - `z/mean_norm` 为 batch 内 `mu_joint` 的平均 L2 norm
 - `z/mean_std` 当前实现为 batch 内跨样本、对 latent 各维度求方差后再取平均
-- `poe/alpha_*` 为 PoE 权重 softmax 后的 batch 平均值
+- `poe/alpha_*` 为 PoE 权重 softmax 后的 batch 平均值；`--alphafix` 打开后则为 `--alphapgc` 在当前可用模态上重新归一化后的值
 
 ### 12.3 生存监控
 

@@ -1,14 +1,13 @@
 """
-Collect Table 1 c-index summaries for a given layer prefix.
+Collect Table 1 c-index summaries.
 
-Default inputs:
-    results/Table1_Cindex_Main/L0Test/L0_*_full_model_val
-    results/Table1_Cindex_Main/L0Test/L0_*_poe_model_val
+By default this script scans every first-level experiment folder under:
+    results/Table1_Cindex_Main/
 
-Default outputs:
-    results_display/Table1_Cindex_Main/L0/summary.csv
-    results_display/Table1_Cindex_Main/L0/baselines/summary/
-    results_display/Table1_Cindex_Main/L0/ours/summary/
+and writes one output directory per experiment, for example:
+    results_display/Table1_Cindex_Main/L0Test/summary.csv
+    results_display/Table1_Cindex_Main/L0Test_BeforeTune/summary.csv
+    results_display/Table1_Cindex_Main/L4Test/summary.csv
 """
 
 from __future__ import annotations
@@ -16,13 +15,14 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import re
 from pathlib import Path
 
 import pandas as pd
 
 
 GROUP_DIR = "Table1_Cindex_Main"
-DEFAULT_LAYER_DIR = "L0"
+LAYER_PREFIX_RE = re.compile(r"^(L\d+)")
 
 STUDY_SPECS = [
     ("BRCA", "tcga_brca"),
@@ -57,9 +57,8 @@ BASELINE_MODEL_SPECS = [
     ("P+C+G", "survpgc_f"),
 ]
 
-OURS_MODEL_SPECS = [("Ours", "A"), ("Ours", "B"), ("Ours", "C")]
-
 TYPE_ORDER = {"P": 0, "C": 1, "G": 2, "P+C": 3, "P+G": 4, "C+G": 5, "P+C+G": 6, "Ours": 7, "Other": 99}
+OURS_MODEL_TOKEN_RE = re.compile(r"survtri_poe_vae(?:__|_)([A-Za-z][A-Za-z0-9_]*)", re.IGNORECASE)
 
 GROUP_CONFIG = {
     "baselines": {
@@ -68,7 +67,6 @@ GROUP_CONFIG = {
     },
     "ours": {
         "results_suffix": "poe_model_val",
-        "model_specs": OURS_MODEL_SPECS,
     },
 }
 
@@ -159,9 +157,39 @@ def resolve_group_study_dir(
 
 def extract_model_name(kind: str, csv_path: Path) -> str:
     model_dir = csv_path.parent.name
-    if kind == "ours":
-        return model_dir.rsplit("__", 1)[-1]
+    if kind != "ours":
+        return model_dir
+
+    match = OURS_MODEL_TOKEN_RE.search(model_dir)
+    if match:
+        return normalize_ours_model_name(match.group(1))
+    if "__" in model_dir:
+        return normalize_ours_model_name(model_dir.rsplit("__", 1)[-1])
     return model_dir
+
+
+def normalize_ours_model_name(token: str) -> str:
+    parts = [part for part in str(token).split("_") if part]
+    if not parts:
+        return str(token)
+    parts[0] = parts[0].upper()
+    parts[1:] = [part.lower() for part in parts[1:]]
+    return "_".join(parts)
+
+
+def ours_model_sort_key(model: str) -> tuple[str, str]:
+    family, sep, variant = model.partition("_")
+    return (family.upper(), variant.lower() if sep else "")
+
+
+def infer_ours_model_specs(study_to_model_text: dict[str, dict[str, str]]) -> list[tuple[str, str]]:
+    models = {
+        model
+        for model_map in study_to_model_text.values()
+        for model in model_map
+        if str(model).strip()
+    }
+    return [("Ours", model) for model in sorted(models, key=ours_model_sort_key)]
 
 
 def collect_group(
@@ -272,29 +300,31 @@ def write_group_outputs(
     output_root: Path,
     *,
     group_dir: str,
-    layer_dir: str,
+    output_name: str,
+    model_specs: list[tuple[str, str]] | None = None,
     study_to_model_rank: dict[str, dict[str, int]] | None = None,
     mean_rank_map: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     cfg = GROUP_CONFIG[kind]
-    out_dir = output_root / group_dir / layer_dir / kind / "summary"
+    specs = model_specs if model_specs is not None else cfg.get("model_specs") or []
+    out_dir = output_root / group_dir / output_name / kind / "summary"
     ensure_clean_csv_dir(out_dir)
     if kind == "ours" and study_to_model_rank is not None:
         study_to_model_text = annotate_models_with_ranks(
             study_to_model_text,
             study_to_model_rank,
-            {model for _, model in cfg["model_specs"]},
+            {model for _, model in specs},
         )
 
     studies = [study for _, study in STUDY_SPECS]
-    models = [model for _, model in cfg["model_specs"]]
+    models = [model for _, model in specs]
     model_to_study_text: dict[str, dict[str, str]] = {model: {} for model in models}
 
     for study in studies:
         model_map = study_to_model_text.get(study, {})
         study_rows: list[dict[str, object]] = []
 
-        for model_type, model in cfg["model_specs"]:
+        for model_type, model in specs:
             value = model_map.get(model, "-")
             study_rows.append(
                 {
@@ -312,7 +342,7 @@ def write_group_outputs(
         study_df.to_csv(out_dir / f"{study}_model_summary.csv", index=False)
 
     matrix_rows: list[dict[str, object]] = []
-    for model_type, model in cfg["model_specs"]:
+    for model_type, model in specs:
         row: dict[str, object] = {"model_type": model_type, "model": model}
         values: list[float] = []
         for study in studies:
@@ -385,12 +415,131 @@ def write_total_summary(
     output_root: Path,
     *,
     group_dir: str,
-    layer_dir: str,
+    output_name: str,
     file_name: str,
 ) -> None:
-    out_path = output_root / group_dir / layer_dir / file_name
+    out_path = output_root / group_dir / output_name / file_name
     summary_df.to_csv(out_path, index=False)
     print(f"[WRITE] {out_path.relative_to(output_root)}")
+
+
+def infer_layer_dir(test_dir: str, experiment_dir: Path | None = None) -> str | None:
+    if experiment_dir is not None and experiment_dir.is_dir():
+        for child in sorted(experiment_dir.iterdir()):
+            match = LAYER_PREFIX_RE.match(child.name)
+            if match:
+                return match.group(1)
+    match = LAYER_PREFIX_RE.match(test_dir)
+    if match:
+        return match.group(1)
+    return None
+
+
+def list_experiment_dirs(results_root: Path, group_dir: str) -> list[Path]:
+    group_root = results_root / group_dir
+    if not group_root.is_dir():
+        return []
+    return sorted(path for path in group_root.iterdir() if path.is_dir())
+
+
+def collect_experiment(
+    results_root: Path,
+    output_root: Path,
+    *,
+    group_dir: str,
+    test_dir: str,
+    layer_dir: str | None = None,
+    output_name: str | None = None,
+) -> None:
+    experiment_dir = results_root / group_dir / test_dir
+    if layer_dir is None:
+        layer_dir = infer_layer_dir(test_dir, experiment_dir)
+    if not layer_dir:
+        print(f"[WARN] Skip {test_dir}: cannot infer layer prefix")
+        return
+
+    output_name = output_name or test_dir
+    print(f"[EXP] {test_dir} -> {output_name} (layer={layer_dir})")
+
+    baselines_text = collect_group(
+        results_root,
+        "baselines",
+        group_dir=group_dir,
+        layer_dir=layer_dir,
+        test_dir=test_dir,
+    )
+    ours_text = collect_group(
+        results_root,
+        "ours",
+        group_dir=group_dir,
+        layer_dir=layer_dir,
+        test_dir=test_dir,
+    )
+    combined_text: dict[str, dict[str, str]] = {}
+    for study, model_map in baselines_text.items():
+        combined_text.setdefault(study, {}).update(model_map)
+    for study, model_map in ours_text.items():
+        combined_text.setdefault(study, {}).update(model_map)
+    ours_model_specs = infer_ours_model_specs(ours_text)
+    combined_specs = BASELINE_MODEL_SPECS + ours_model_specs
+    global_rank_map = build_global_rank_map(
+        combined_text,
+        combined_specs,
+    )
+    full_mean_rank_map = build_mean_rank_map(
+        combined_text,
+        combined_specs,
+        [study for _, study in STUDY_SPECS],
+    )
+    five_dataset_mean_rank_map = build_mean_rank_map(
+        combined_text,
+        combined_specs,
+        FIVE_DATASET_STUDIES,
+    )
+
+    baseline_matrix_df = write_group_outputs(
+        "baselines",
+        baselines_text,
+        output_root,
+        group_dir=group_dir,
+        output_name=output_name,
+    )
+    ours_matrix_df = write_group_outputs(
+        "ours",
+        ours_text,
+        output_root,
+        group_dir=group_dir,
+        output_name=output_name,
+        model_specs=ours_model_specs,
+        study_to_model_rank=global_rank_map,
+        mean_rank_map=full_mean_rank_map,
+    )
+    full_summary_df = build_summary_frame(
+        baseline_matrix_df,
+        ours_matrix_df,
+        [study for _, study in STUDY_SPECS],
+        ours_mean_rank_map=full_mean_rank_map,
+    )
+    five_dataset_summary_df = build_summary_frame(
+        baseline_matrix_df,
+        ours_matrix_df,
+        FIVE_DATASET_STUDIES,
+        ours_mean_rank_map=five_dataset_mean_rank_map,
+    )
+    write_total_summary(
+        full_summary_df,
+        output_root,
+        group_dir=group_dir,
+        output_name=output_name,
+        file_name="summary.csv",
+    )
+    write_total_summary(
+        five_dataset_summary_df,
+        output_root,
+        group_dir=group_dir,
+        output_name=output_name,
+        file_name="summary_5datasets.csv",
+    )
 
 
 def main() -> None:
@@ -415,94 +564,40 @@ def main() -> None:
     )
     parser.add_argument(
         "--layer-dir",
-        default=DEFAULT_LAYER_DIR,
-        help="Layer prefix to collect, such as L0 or L4",
+        default=None,
+        help="Optional layer prefix such as L0 or L4; inferred from each experiment folder by default",
     )
     parser.add_argument(
         "--test-dir",
         default=None,
-        help="Optional extra subdirectory under the grouped results directory; defaults to {layer-dir}Test",
+        help="Optional experiment folder under the grouped results directory; scans all first-level folders by default",
     )
     args = parser.parse_args()
 
-    test_dir = args.test_dir if args.test_dir is not None else f"{args.layer_dir}Test"
+    if args.test_dir is not None:
+        collect_experiment(
+            args.results_root,
+            args.output_root,
+            group_dir=args.group_dir,
+            test_dir=args.test_dir,
+            layer_dir=args.layer_dir,
+        )
+        print("Done.")
+        return
 
-    baselines_text = collect_group(
-        args.results_root,
-        "baselines",
-        group_dir=args.group_dir,
-        layer_dir=args.layer_dir,
-        test_dir=test_dir,
-    )
-    ours_text = collect_group(
-        args.results_root,
-        "ours",
-        group_dir=args.group_dir,
-        layer_dir=args.layer_dir,
-        test_dir=test_dir,
-    )
-    combined_text: dict[str, dict[str, str]] = {}
-    for study, model_map in baselines_text.items():
-        combined_text.setdefault(study, {}).update(model_map)
-    for study, model_map in ours_text.items():
-        combined_text.setdefault(study, {}).update(model_map)
-    global_rank_map = build_global_rank_map(
-        combined_text,
-        BASELINE_MODEL_SPECS + OURS_MODEL_SPECS,
-    )
-    full_mean_rank_map = build_mean_rank_map(
-        combined_text,
-        BASELINE_MODEL_SPECS + OURS_MODEL_SPECS,
-        [study for _, study in STUDY_SPECS],
-    )
-    five_dataset_mean_rank_map = build_mean_rank_map(
-        combined_text,
-        BASELINE_MODEL_SPECS + OURS_MODEL_SPECS,
-        FIVE_DATASET_STUDIES,
-    )
+    experiment_dirs = list_experiment_dirs(args.results_root, args.group_dir)
+    if not experiment_dirs:
+        print(f"[WARN] No experiment folders found under {args.results_root / args.group_dir}")
+        return
 
-    baseline_matrix_df = write_group_outputs(
-        "baselines",
-        baselines_text,
-        args.output_root,
-        group_dir=args.group_dir,
-        layer_dir=args.layer_dir,
-    )
-    ours_matrix_df = write_group_outputs(
-        "ours",
-        ours_text,
-        args.output_root,
-        group_dir=args.group_dir,
-        layer_dir=args.layer_dir,
-        study_to_model_rank=global_rank_map,
-        mean_rank_map=full_mean_rank_map,
-    )
-    full_summary_df = build_summary_frame(
-        baseline_matrix_df,
-        ours_matrix_df,
-        [study for _, study in STUDY_SPECS],
-        ours_mean_rank_map=full_mean_rank_map,
-    )
-    five_dataset_summary_df = build_summary_frame(
-        baseline_matrix_df,
-        ours_matrix_df,
-        FIVE_DATASET_STUDIES,
-        ours_mean_rank_map=five_dataset_mean_rank_map,
-    )
-    write_total_summary(
-        full_summary_df,
-        args.output_root,
-        group_dir=args.group_dir,
-        layer_dir=args.layer_dir,
-        file_name="summary.csv",
-    )
-    write_total_summary(
-        five_dataset_summary_df,
-        args.output_root,
-        group_dir=args.group_dir,
-        layer_dir=args.layer_dir,
-        file_name="summary_5datasets.csv",
-    )
+    for experiment_dir in experiment_dirs:
+        collect_experiment(
+            args.results_root,
+            args.output_root,
+            group_dir=args.group_dir,
+            test_dir=experiment_dir.name,
+            layer_dir=args.layer_dir,
+        )
     print("Done.")
 
 

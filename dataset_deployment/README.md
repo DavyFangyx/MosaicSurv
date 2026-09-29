@@ -69,6 +69,8 @@ cd /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace
 bash build_workspace.sh
 ```
 
+`tcga_kich` / `tcga_kirc` / `tcga_kirp` 虽然共享同一份 WSI 源目录 `TCGA-KICH-KIRC-KIRP`，但建链时会按各自 `data_tcgal_stats/<dataset>/*_patients.csv` 的 `submitter_id` 过滤，只保留本队列病人。
+
 Workspace 校验：
 
 ```bash

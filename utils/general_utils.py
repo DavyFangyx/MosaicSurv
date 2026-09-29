@@ -8,6 +8,21 @@ from torch.utils.data import DataLoader, Sampler, WeightedRandomSampler, RandomS
 
 device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+def _format_poe_stage1_studies(raw_value):
+    studies = []
+    seen = set()
+    for token in str(raw_value).split(","):
+        study = token.strip()
+        if not study:
+            continue
+        if not study.startswith("tcga_"):
+            study = f"tcga_{study}"
+        if study not in seen:
+            studies.append(study)
+            seen.add(study)
+    return studies
+
 def _infer_wsi_encoding_dim(data_root_dir):
     r"""
     Infer WSI embedding dim from the first available .pt file under data_root_dir.
@@ -183,6 +198,10 @@ def _get_custom_exp_code(args):
     param_code += "_modality_" + str(args.modality)
     param_code += "_selected_" + str(args.selected_modalities).replace(",", "_")
     param_code += "_pathT_" + str(args.type_of_path)
+    if args.modality == "survtri_poe_vae_b_crossstage1":
+        stage1_tag = "_".join(_format_poe_stage1_studies(getattr(args, "poe_stage1_studies", "")))
+        if stage1_tag:
+            param_code += "_stage1_" + stage1_tag
 
     #----> Updating
     args.param_code = param_code
@@ -251,6 +270,23 @@ def _create_results_dir(args):
         folder = f"{args.modality}__{args.selected_modalities.replace(',', '_')}"
     elif args.modality == "survtri_poe_vae":
         folder = f"{args.modality}__{getattr(args, 'poe_variant', 'A')}"
+        if getattr(args, "selected_modalities", "wsi,gene,clinic") != "wsi,gene,clinic":
+            folder += f"__{args.selected_modalities.replace(',', '_')}"
+    elif args.modality in {"survtri_poe_vae_b_kl", "survtri_poe_vae_b_nopretrain"}:
+        folder = args.modality
+        if getattr(args, "selected_modalities", "wsi,gene,clinic") != "wsi,gene,clinic":
+            folder += f"__{args.selected_modalities.replace(',', '_')}"
+    elif args.modality == "survtri_poe_vae_b_crossstage1":
+        folder = f"{args.modality}__{getattr(args, 'poe_variant', 'B')}"
+        stage1_tag = "_".join(_format_poe_stage1_studies(getattr(args, "poe_stage1_studies", "")))
+        if stage1_tag:
+            folder += f"__stage1_{stage1_tag}"
+        if getattr(args, "selected_modalities", "wsi,gene,clinic") != "wsi,gene,clinic":
+            folder += f"__{args.selected_modalities.replace(',', '_')}"
+    elif args.modality == "modality_concat":
+        concat_wsi = getattr(args, "concat_wsi", "resampler")
+        concat_impute = getattr(args, "concat_impute", "zero")
+        folder = f"{args.modality}__{concat_wsi}__{concat_impute}"
     else:
         folder = args.modality
 
@@ -684,7 +720,27 @@ def _get_split_loader(args, split_dataset, training = False, testing = False, we
         "survtri_mlp_mhsa",
     ]:
         collate_fn = _collate_survpgc_f
-    elif args.modality in ["survtri_poe_vae", "survtri_poe_vae_b_nopretrain"]:
+    elif args.modality in [
+        "survtri_poe_vae",
+        "survtri_poe_vae_b_kl",
+        "survtri_poe_vae_b_crossstage1",
+        "survtri_poe_vae_b_nopretrain",
+        "survtri_poe_vae_b_single",
+        "survtri_poe_vae_b_multi",
+        "survtri_poe_vae_b_film",
+        "survtri_poe_vae_a_film",
+        "survtri_poe_vae_c_single",
+        "survtri_poe_vae_c_single_enum",
+        "survtri_poe_vae_c_multi",
+        "survtri_poe_vae_c_film",
+        "survtri_poe_vae_c_film_kl",
+        "survtri_poe_vae_c_film_noenum",
+        "survtri_poe_vae_c_film_surv0",
+        "survtri_poe_vae_c_film_beta0",
+        "modality_concat",
+        "mvae_poe",
+        "mopoe",
+    ]:
         collate_fn = _collate_survtri_poe_vae
     elif args.modality in ["survpc", "survpc_f", "mlppc_concat"]:
         collate_fn = _collate_survpc_f

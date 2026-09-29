@@ -1,13 +1,9 @@
-# DEVIATION:
-# - This wrapper implements the guide's concat ablation with frozen features,
-#   pre-MLP filling, and a Cox survival head.
-
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
 
-from models.missing_modality_baselines.common import CoxHead, ModalityMLP, normalize_avail, safe_flatten
+from models.missing_modality_baselines.common import ModalityMLP, normalize_avail, safe_flatten
 from models.model_utils import WSIMILResampler, masked_mean
 
 
@@ -22,7 +18,7 @@ class ConcatMissingModalityBaseline(nn.Module):
         d_z: int = 128,
         mmhid: int = 256,
         dropout: float = 0.25,
-        concat_wsi: str = "meanpool",
+        concat_wsi: str = "resampler",
         concat_impute: str = "zero",
         label_dim: int = 1,
     ):
@@ -69,10 +65,13 @@ class ConcatMissingModalityBaseline(nn.Module):
 
         self.fuse_fc = nn.Sequential(
             nn.Linear(3 * d_z, mmhid),
-            nn.ReLU(inplace=True),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(mmhid, mmhid),
+            nn.ReLU(),
             nn.Dropout(dropout),
         )
-        self.classifier = CoxHead(mmhid, hidden_dim=mmhid, dropout=dropout)
+        self.classifier = nn.Linear(mmhid, label_dim)
 
     def _ensure_clinic_branch(self, flat_dim: int, device: torch.device) -> None:
         if self.mlp_clinic is not None and self._clinic_flat_dim == flat_dim:

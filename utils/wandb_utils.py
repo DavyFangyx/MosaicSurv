@@ -46,13 +46,14 @@ def init_wandb_run(args, fold, stage_name=None, job_type=None):
         trial = getattr(args, "optuna_trial", None)
         trial_number = trial.number if trial is not None else -1
         trial_tag = getattr(args, "optuna_trial_tag", f"trial_{trial_number:04d}")
-        run_name = f"{model_or_run}_{trial_tag}_{stage_tag}_fold{fold}"
+        run_name = f"{model_or_run}_{trial_tag}_{args.study}_{stage_tag}_fold{fold}"
         group = f"{experiment_tag}_optuna"
         tags = [
             experiment_tag,
             "optuna",
             model_or_run,
             trial_tag,
+            args.study,
             stage_tag,
             f"fold_{fold}",
             args.modality,
@@ -64,6 +65,7 @@ def init_wandb_run(args, fold, stage_name=None, job_type=None):
             "model": model_or_run,
             "trial": trial_number,
             "trial_tag": trial_tag,
+            "study": args.study,
             "stage": stage_tag,
             "fold": fold,
             "modality": args.modality,

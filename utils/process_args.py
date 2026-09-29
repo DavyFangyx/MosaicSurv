@@ -1,4 +1,6 @@
 import argparse
+import sys
+from pathlib import Path
 
 from dataset_deployment.registry import (
     DEFAULT_CLINIC_EXPERIMENT,
@@ -47,7 +49,7 @@ def _process_args():
     parser.add_argument('--clinic_dir', type=str, default=DEFAULT_CLINIC_DIR, help='Path to dir with clinical embedding')
     parser.add_argument('--gene_dir', type=str, default=DEFAULT_GENE_DIR, help='Path to dir with gene foundation model embedding')
     parser.add_argument('--clinical_file', type=str, default=None, help='Path to study clinical CSV')
-    parser.add_argument('--data_pack_dir', type=str, default=None, help='Path to HGCN graph package directory')
+    parser.add_argument('--data_pack_dir', type=str, default=None, help='Optional legacy HGCN pack directory; unused when P/C/G graph dirs are provided')
 
     parser.add_argument('--num_patches', type=int, default=4096, help='number of patches')
     parser.add_argument('--label_col', type=str, default="survival_months", help='type of survival (OS, DSS, PFI, PFS)')
@@ -60,6 +62,8 @@ def _process_args():
                         help='hidden size preset for single-modality models')
     parser.add_argument('--single_use_input_ln', action='store_true', default=False,
                         help='apply LayerNorm on single-modality gene foundation inputs')
+    parser.add_argument('--concat_wsi', type=str, default='resampler', choices=['meanpool', 'resampler'],
+                        help='WSI frontend for the concat baseline; default is resampler')
 
     #----> split related 
     parser.add_argument('--k', type=int, default=5, help='number of folds (default: 10)')
@@ -109,6 +113,8 @@ def _process_args():
                         help='TriPoEVAE training variant: A=freeze+linear probe, B=pretrain+finetune, C=joint train')
     parser.add_argument('--poe_surv_lambda', type=float, default=1.0,
                         help='survival loss weight for TriPoEVAE variant C')
+    parser.add_argument('--poe_encoder_lr_ratio', type=float, default=0.1,
+                        help='TriPoEVAE-B stage2: encoder/PoE/decoder LR = --lr * this ratio')
     parser.add_argument('--poe_modality_dropout', type=float, default=0.2,
                         help='modality dropout probability in TriPoEVAE VAE training')
     parser.add_argument('--poe_decoder_hidden_dim', type=int, default=512,
@@ -116,7 +122,13 @@ def _process_args():
     parser.add_argument('--poe_mmhid', type=int, default=256,
                         help='fusion hidden dim for TriPoEVAE survival head')
     parser.add_argument('--poe_beta_target', type=float, default=1.0,
-                        help='target beta for TriPoEVAE Jeffreys warmup')
+                        help='target / fixed beta for TriPoEVAE Jeffreys term')
+    parser.add_argument('--betafix', action='store_true', default=False,
+                        help='disable TriPoEVAE Jeffreys beta warmup and keep beta at --poe_beta_target')
+    parser.add_argument('--alphafix', action='store_true', default=False,
+                        help='disable learnable TriPoEVAE PoE alpha and use --alphapgc')
+    parser.add_argument('--alphapgc', type=str, default=None,
+                        help='fixed PoE alpha as pathology,gene,clinic, e.g. 0.5,0.3,0.2; required with --alphafix except in main_tune_optuna.py')
     parser.add_argument('--poe_transformer_layers', type=int, default=1,
                         help='number of transformer layers for gene/clinic encoders in TriPoEVAE')
     parser.add_argument('--concat_impute', type=str, default='zero', choices=['zero', 'mean'],
@@ -125,6 +137,17 @@ def _process_args():
                         help='for TriPoEVAE-B only: save stage1 checkpoints on a fixed interval and launch one stage2 run per checkpoint')
     parser.add_argument('--poe_stage1_ckpt_interval', type=int, default=5,
                         help='epoch interval for saving TriPoEVAE-B stage1 checkpoints when checkpoint scan is enabled')
+    parser.add_argument('--poe_stage1_studies', type=str, default='',
+                        help='comma-separated study list for the cross-study stage1 pretraining model')
+    parser.add_argument('--missing_mode', type=str, default='model_gen',
+                        choices=['model_gen', 'unified_mask_csv'],
+                        help='model_gen uses per-model dropout; unified_mask_csv uses a shared exp-group mask csv')
+    parser.add_argument('--missing_pattern', type=str, default='',
+                        help='unified_mask_csv rates as wsi,gene,clinic percents, e.g. 60,0,0 or 20,20,20')
+    parser.add_argument('--missing_seed', type=int, default=None,
+                        help='seed for unified/model_gen missing masks; defaults to --seed')
+    parser.add_argument('--eval_modalities', type=str, default='off',
+                        help='inference-only missing subsets over complete split modalities: off | all | P,C,G,PC,PG,CG,PCG | wsi,clinic')
     parser.add_argument('--wandb_mode', type=str, default='disabled',
                         choices=['disabled', 'offline', 'online'],
                         help='Weights & Biases logging mode')
@@ -156,6 +179,10 @@ def _process_args():
                         help='number of startup trials before pruning activates')
     parser.add_argument('--optuna_n_warmup_steps', type=int, default=3,
                         help='number of warmup epochs before pruning activates')
+    parser.add_argument('--optuna_studies', type=str, default='',
+                        help='comma-separated studies for one Optuna trial, evaluated in listed order; empty uses --study')
+    parser.add_argument('--optuna_analysis_log', type=str, default=None,
+                        help='compact Optuna analysis log path; default is results/optuna/<study_name>.log')
 
     #---> model related
     parser.add_argument('--fusion', type=str, default=None, choices=['concat', 'bilinear'])
@@ -194,9 +221,25 @@ def _process_args():
                             'survtri_mlp_concat',
                             'survtri_mlp_mhsa',
                             'survtri_poe_vae',
+                            'survtri_poe_vae_b_kl',
+                            'survtri_poe_vae_b_crossstage1',
                             'survtri_poe_vae_b_nopretrain',
+                            'survtri_poe_vae_b_single',
+                            'survtri_poe_vae_b_multi',
+                            'survtri_poe_vae_b_film',
+                            'survtri_poe_vae_a_film',
+                            'survtri_poe_vae_c_single',
+                            'survtri_poe_vae_c_single_enum',
+                            'survtri_poe_vae_c_multi',
+                            'survtri_poe_vae_c_film',
+                            'survtri_poe_vae_c_film_kl',
+                            'survtri_poe_vae_c_film_noenum',
+                            'survtri_poe_vae_c_film_surv0',
+                            'survtri_poe_vae_c_film_beta0',
+                            'modality_concat',
+                            'mvae_poe',
+                            'mopoe',
                             'hgcn',
-                            'flex_moe',
                             # ablation WSI+C
                             'survpc_f',
                             # ablation G+C
@@ -232,6 +275,42 @@ def _process_args():
         args.gene_dir = str(inferred_paths['gene_dir'])
     if args.clinical_file is None:
         args.clinical_file = str(inferred_paths['clinical_file'])
+
+    if args.modality in {
+        "survtri_poe_vae_b_kl",
+        "survtri_poe_vae_b_crossstage1",
+        "survtri_poe_vae_b_nopretrain",
+        "survtri_poe_vae_b_single",
+        "survtri_poe_vae_b_multi",
+        "survtri_poe_vae_b_film",
+    }:
+        args.poe_variant = "B"
+    elif args.modality == "survtri_poe_vae_a_film":
+        args.poe_variant = "A"
+    elif args.modality in {
+        "survtri_poe_vae_c_single",
+        "survtri_poe_vae_c_single_enum",
+        "survtri_poe_vae_c_multi",
+        "survtri_poe_vae_c_film",
+        "survtri_poe_vae_c_film_kl",
+        "survtri_poe_vae_c_film_noenum",
+        "survtri_poe_vae_c_film_surv0",
+        "survtri_poe_vae_c_film_beta0",
+    }:
+        args.poe_variant = "C"
+
+    if args.alphafix:
+        from models.model_utils import parse_alphapgc
+        if args.alphapgc is None:
+            # Optuna samples alphapgc per trial after argparse. Regular training still needs weights now.
+            if Path(sys.argv[0]).name != "main_tune_optuna.py":
+                raise ValueError(
+                    "alphafix requires alphapgc weights for pathology,gene,clinic, e.g. 0.5,0.3,0.2"
+                )
+        else:
+            args.alphapgc = ",".join(f"{weight:g}" for weight in parse_alphapgc(args.alphapgc))
+    else:
+        args.alphapgc = None
 
     if not (args.task == "survival"):
         print("Task and folder does not match")

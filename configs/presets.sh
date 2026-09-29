@@ -4,6 +4,32 @@
 #   - 设置 EXTRA_ARGS 数组（追加到命令末尾）
 #   - 设置 RESULTS_SUBDIR（用于对齐 Python 侧真实结果目录）
 
+POE_STAGE1_STUDIES="${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}"
+
+format_poe_stage1_studies_tag() {
+    local raw_value="$1"
+    local -a studies=()
+    local token study
+    for token in ${raw_value//,/ }; do
+        study="${token// /}"
+        [ -z "$study" ] && continue
+        if [[ "$study" != tcga_* ]]; then
+            study="tcga_${study}"
+        fi
+        local seen=false
+        for token in "${studies[@]}"; do
+            if [[ "$token" == "$study" ]]; then
+                seen=true
+                break
+            fi
+        done
+        if [ "$seen" = false ]; then
+            studies+=("$study")
+        fi
+    done
+    printf '%s\n' "${studies[@]}"
+}
+
 apply_preset() {
     local preset="$1"
 
@@ -163,6 +189,7 @@ apply_preset() {
                 --label_dim "$LABEL_DIM"
                 --poe_variant "$POE_VARIANT"
                 --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_encoder_lr_ratio "$POE_ENCODER_LR_RATIO"
                 --poe_modality_dropout "$POE_MODALITY_DROPOUT"
                 --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
                 --poe_mmhid "$POE_MMHID"
@@ -208,11 +235,239 @@ apply_preset() {
                 --label_dim "$LABEL_DIM"
                 --poe_variant "$POE_VARIANT"
                 --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_encoder_lr_ratio "$POE_ENCODER_LR_RATIO"
                 --poe_modality_dropout "$POE_MODALITY_DROPOUT"
                 --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
                 --poe_mmhid "$POE_MMHID"
                 --poe_beta_target "$POE_BETA_TARGET"
                 --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+            )
+            ;;
+        survtri_poe_vae_B_kl)
+            MODEL="survtri_poe_vae_b_kl"
+            POE_VARIANT="B"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_encoder_lr_ratio "$POE_ENCODER_LR_RATIO"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+        survtri_poe_vae_B_crossstage1)
+            MODEL="survtri_poe_vae_b_crossstage1"
+            POE_VARIANT="B"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            STAGE1_TAG="$(format_poe_stage1_studies_tag "$POE_STAGE1_STUDIES" | tr '\n' '_')"
+            STAGE1_TAG="${STAGE1_TAG%_}"
+            if [ -n "$STAGE1_TAG" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__stage1_${STAGE1_TAG}"
+            fi
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_encoder_lr_ratio "$POE_ENCODER_LR_RATIO"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --poe_stage1_studies "$POE_STAGE1_STUDIES"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+
+        survtri_poe_vae_A_film)
+            MODEL="survtri_poe_vae_a_film"
+            POE_VARIANT="A"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+        survtri_poe_vae_B_single)
+            MODEL="survtri_poe_vae_b_single"
+            POE_VARIANT="B"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+        survtri_poe_vae_B_multi)
+            MODEL="survtri_poe_vae_b_multi"
+            POE_VARIANT="B"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+        survtri_poe_vae_B_film)
+            MODEL="survtri_poe_vae_b_film"
+            POE_VARIANT="B"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+        survtri_poe_vae_C_single|survtri_poe_vae_C_single_enum)
+            if [ "$PRESET" = "survtri_poe_vae_C_single_enum" ]; then
+                MODEL="survtri_poe_vae_c_single_enum"
+            else
+                MODEL="survtri_poe_vae_c_single"
+            fi
+            POE_VARIANT="C"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+        survtri_poe_vae_C_multi)
+            MODEL="survtri_poe_vae_c_multi"
+            POE_VARIANT="C"
+            BAG_LOSS="cox_surv"
+            RESULTS_SUBDIR="$MODEL"
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
+            )
+            ;;
+        survtri_poe_vae_C_film|survtri_poe_vae_C_film_noenum|survtri_poe_vae_C_film_kl|survtri_poe_vae_C_film_beta0|survtri_poe_vae_C_film_surv0)
+            if [ "$PRESET" = "survtri_poe_vae_C_film_kl" ]; then
+                MODEL="survtri_poe_vae_c_film_kl"
+            elif [ "$PRESET" = "survtri_poe_vae_C_film_surv0" ]; then
+                MODEL="survtri_poe_vae_c_film_surv0"
+            elif [ "$PRESET" = "survtri_poe_vae_C_film_beta0" ]; then
+                # 独立 modality 名：python 按 modality 建结果目录，
+                # 若复用 c_film 会覆盖主模型结果
+                MODEL="survtri_poe_vae_c_film_beta0"
+            else
+                MODEL="survtri_poe_vae_c_film"
+            fi
+            if [ "$PRESET" = "survtri_poe_vae_C_film_noenum" ]; then
+                MODEL="survtri_poe_vae_c_film_noenum"
+            elif [ "$PRESET" = "survtri_poe_vae_C_film_beta0" ]; then
+                POE_BETA_TARGET=0
+            fi
+            RESULTS_SUBDIR="$MODEL"
+            POE_VARIANT="C"
+            BAG_LOSS="cox_surv"
+            if [ -z "${RESULTS_SUBDIR:-}" ]; then RESULTS_SUBDIR="$MODEL"; fi
+            if [ "$SELECTED_MODALITIES" != "wsi,gene,clinic" ]; then
+                RESULTS_SUBDIR="${RESULTS_SUBDIR}__${SELECTED_MODALITIES//,/_}"
+            fi
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+                --poe_variant "$POE_VARIANT"
+                --poe_surv_lambda "$POE_SURV_LAMBDA"
+                --poe_modality_dropout "$POE_MODALITY_DROPOUT"
+                --poe_decoder_hidden_dim "$POE_DECODER_HIDDEN_DIM"
+                --poe_mmhid "$POE_MMHID"
+                --poe_beta_target "$POE_BETA_TARGET"
+                --poe_transformer_layers "$POE_TRANSFORMER_LAYERS"
+                --lr_stage1 "$LR_STAGE1"
+                --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
+                --batch_size_stage1 "$BATCH_SIZE_STAGE1"
             )
             ;;
 
@@ -274,6 +529,60 @@ apply_preset() {
                 --max_epochs_stage1 "$MAX_EPOCHS_STAGE1"
                 --batch_size_stage1 "$BATCH_SIZE_STAGE1"
             )
+            ;;
+
+        # ========== 缺失模态基线（不含 flexmoe）==========
+        modality_concat|modality_concat_zero|modality_concat_mean|modality_concat_resampler_zero|modality_concat_resampler_mean|modality_concat_meanpool_zero|modality_concat_meanpool_mean)
+            case "$preset" in
+                modality_concat_meanpool_zero)
+                    CONCAT_WSI="meanpool"
+                    CONCAT_IMPUTE="zero"
+                    ;;
+                modality_concat_meanpool_mean)
+                    CONCAT_WSI="meanpool"
+                    CONCAT_IMPUTE="mean"
+                    ;;
+                modality_concat_zero|modality_concat_resampler_zero)
+                    CONCAT_WSI="resampler"
+                    CONCAT_IMPUTE="zero"
+                    ;;
+                modality_concat_mean|modality_concat_resampler_mean)
+                    CONCAT_WSI="resampler"
+                    CONCAT_IMPUTE="mean"
+                    ;;
+            esac
+            MODEL="modality_concat"
+            BAG_LOSS="cox_surv"
+            LABEL_DIM=1
+            RESULTS_SUBDIR="${MODEL}__${CONCAT_WSI}__${CONCAT_IMPUTE}"
+            EXTRA_ARGS=(
+                --concat_wsi "$CONCAT_WSI"
+                --concat_impute "$CONCAT_IMPUTE"
+                --label_dim "$LABEL_DIM"
+            )
+            ;;
+        mvae_poe)
+            MODEL="mvae_poe"
+            BAG_LOSS="cox_surv"
+            LABEL_DIM=1
+            RESULTS_SUBDIR="$MODEL"
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+            )
+            ;;
+        mopoe)
+            MODEL="mopoe"
+            BAG_LOSS="cox_surv"
+            LABEL_DIM=1
+            RESULTS_SUBDIR="$MODEL"
+            EXTRA_ARGS=(
+                --label_dim "$LABEL_DIM"
+            )
+            ;;
+        hgcn)
+            MODEL="hgcn"
+            RESULTS_SUBDIR="$MODEL"
+            BATCH_SIZE=32
             ;;
 
         *)

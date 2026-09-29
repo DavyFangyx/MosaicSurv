@@ -15,9 +15,9 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
-from dataset_deployment.modality_availability import get_case_availability
 from dataset_deployment.workspace_features import build_case_feature_index, resolve_case_feature_path
 from utils.general_utils import _series_intersection
+from utils.missing_mask_protocol import load_fold_mask_lookup, resolve_case_availability, unified_mask_csv_path
 
 
 ALL_MODALITIES = ['rna_clean.csv']  
@@ -661,6 +661,13 @@ class SurvivalDatasetFactory:
         elif split_key == "test":
             sample=False
             
+        missing_mode = getattr(args, "missing_mode", "model_gen")
+        mask_lookup = None
+        mask_csv_path = None
+        if missing_mode == "unified_mask_csv":
+            mask_csv_path = unified_mask_csv_path(args, fold, study=args.study)
+            mask_lookup = load_fold_mask_lookup(mask_csv_path)
+
         split_dataset = SurvivalDataset(
             split_key=split_key,
             fold=fold,
@@ -680,7 +687,12 @@ class SurvivalDatasetFactory:
             clinical_data=clinical_data_for_split,
             num_patches=self.num_patches,
             omic_names=self.omic_names,
-            sample=sample
+            sample=sample,
+            missing_mode=missing_mode,
+            missing_seed=getattr(args, "missing_seed", args.seed),
+            poe_modality_dropout=getattr(args, "poe_modality_dropout", 0.0),
+            mask_lookup=mask_lookup,
+            mask_csv_path=mask_csv_path,
             )
 
         if split_key == "train":
@@ -714,6 +726,11 @@ class SurvivalDataset(Dataset):
         num_patches=4000,
         omic_names=None,
         sample=True,
+        missing_mode="model_gen",
+        missing_seed=1,
+        poe_modality_dropout=0.0,
+        mask_lookup=None,
+        mask_csv_path=None,
         ): 
 
         super(SurvivalDataset, self).__init__()
@@ -739,6 +756,11 @@ class SurvivalDataset(Dataset):
         self.omic_names = omic_names
         self.num_pathways = len(omic_names)
         self.sample = sample
+        self.missing_mode = missing_mode
+        self.missing_seed = missing_seed
+        self.poe_modality_dropout = poe_modality_dropout
+        self.mask_lookup = mask_lookup
+        self.mask_csv_path = mask_csv_path
         self._feature_path_cache = {}
         self._availability_cache = {}
 
@@ -864,12 +886,49 @@ class SurvivalDataset(Dataset):
             "survtri_mlp_concat",
             "survtri_mlp_mhsa",
             "survtri_poe_vae",
+            "survtri_poe_vae_b_kl",
+            "survtri_poe_vae_b_crossstage1",
             "survtri_poe_vae_b_nopretrain",
+            "survtri_poe_vae_b_single",
+            "survtri_poe_vae_b_multi",
+            "survtri_poe_vae_b_film",
+            "survtri_poe_vae_a_film",
+            "survtri_poe_vae_c_single",
+            "survtri_poe_vae_c_single_enum",
+            "survtri_poe_vae_c_multi",
+            "survtri_poe_vae_c_film",
+            "survtri_poe_vae_c_film_kl",
+            "survtri_poe_vae_c_film_noenum",
+            "survtri_poe_vae_c_film_surv0",
+            "survtri_poe_vae_c_film_beta0",
+            "modality_concat",
+            "mvae_poe",
+            "mopoe",
         ]:
             patch_features, mask = self._load_wsi_embs_from_path(self.data_dir, slide_ids)
             gene_features = self._load_gene_embs_from_path(self.gene_dir, slide_ids)
             clinic_features = self._load_clinic_embs_from_prompt(self.clinic_dir, slide_ids)
-            if self.modality in {"survtri_poe_vae", "survtri_poe_vae_b_nopretrain"}:
+            if self.modality in {
+                "survtri_poe_vae",
+                "survtri_poe_vae_b_kl",
+                "survtri_poe_vae_b_crossstage1",
+                "survtri_poe_vae_b_nopretrain",
+                "survtri_poe_vae_b_single",
+                "survtri_poe_vae_b_multi",
+                "survtri_poe_vae_b_film",
+                "survtri_poe_vae_a_film",
+                "survtri_poe_vae_c_single",
+                "survtri_poe_vae_c_single_enum",
+                "survtri_poe_vae_c_multi",
+                "survtri_poe_vae_c_film",
+                "survtri_poe_vae_c_film_kl",
+                "survtri_poe_vae_c_film_noenum",
+                "survtri_poe_vae_c_film_surv0",
+                "survtri_poe_vae_c_film_beta0",
+                "modality_concat",
+                "mvae_poe",
+                "mopoe",
+            }:
                 avail = self._get_case_avail(case_id)
                 return (patch_features, gene_features, clinic_features, label, event_time, c, clinical_data, mask, avail)
             return (patch_features, gene_features, clinic_features, label, event_time, c, clinical_data, mask)
@@ -920,9 +979,16 @@ class SurvivalDataset(Dataset):
     def _get_case_avail(self, case_id):
         normalized_case_id = str(case_id).strip().upper()[:12]
         if normalized_case_id not in self._availability_cache:
-            self._availability_cache[normalized_case_id] = get_case_availability(
+            self._availability_cache[normalized_case_id] = resolve_case_availability(
                 normalized_case_id,
-                self.study_name,
+                missing_mode=self.missing_mode,
+                mask_lookup=self.mask_lookup,
+                mask_csv_path=self.mask_csv_path,
+                is_training=self.is_training,
+                modality=self.modality,
+                fold=self.fold,
+                missing_seed=self.missing_seed,
+                drop_prob=self.poe_modality_dropout,
             )
         return dict(self._availability_cache[normalized_case_id])
     

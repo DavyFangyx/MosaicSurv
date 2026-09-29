@@ -1,11 +1,177 @@
-# 对比模型改造说明
+# 对比模型实现明细
 
-这份文件只记录目前已经实际改过的内容。
+这份文件只记录目前已经实际落地的内容。
 每一条都按“原来是什么 / 现在改成什么 / 为什么这么改”来写。
+Flex-MoE 不在本文件范围内。
 
-## 1. HGCN
+## 1. Concat 地板组（`--modality modality_concat`）
 
-### 1.1 输入维度改造
+### 1.1 接入本项目训练入口
+- 文件：
+  - `models/missing_modality_baselines/concat.py`
+  - `utils/core_utils.py`
+  - `datasets/dataset_survival.py`
+  - `main.py`
+- 原来：
+  - 仓库里没有 concat 地板组
+  - 也没有 `--concat_wsi` / `--concat_impute`
+- 现在：
+  - 新增 `ConcatMissingModalityBaseline`
+  - 通过 `--modality modality_concat` 走本项目 `main.py` / `_train_val_test`
+  - 和主模型共用同一份 patient-level 数据、同一份 `avail` mask、同一套 Cox 训练循环
+  - `--concat_wsi` 默认 `resampler`，再和 `--concat_impute {zero, mean}` 组合
+  - `meanpool` 代码还在，但不作为当前实验入口
+- 原因：
+  - 需要一个没有融合机制、只做填充再拼接的地板对照
+
+### 1.2 WSI 前端拆成 meanpool / resampler 两路
+- 文件：`models/missing_modality_baselines/concat.py`
+- 原来：
+  - 没有统一的 concat 地板组 WSI 前端
+- 现在：
+  - 当前默认 / 实际调用的是 `resampler`
+  - `resampler`：复用主模型同结构的 `WSIMILResampler`（独立权重，不加载主模型 ckpt）
+    - `(n_patch, 1024) -> (B, 16, 768) -> mean -> (B, 768)`
+  - `meanpool`：对有效 patch 做 masked mean，得到 `(B, 1024)`。（已实现，但不调用）
+  - Gene：flatten 成 `(B, 3072)`
+  - Clinic：flatten 成 `(B, n_c * 512)`
+- 原因：
+  - 当前实验只跑 `concat_rs`，用来和主模型只差融合与填充
+  - `concat_mp` 作为最朴素参考值已经写好，但当前不调用
+
+### 1.3 缺失填充发生在 MLP 之前
+- 文件：
+  - `models/missing_modality_baselines/concat.py`
+  - `utils/core_utils.py`
+- 原来：
+  - 没有本项目口径的缺失填充
+- 现在：
+  - dataloader 下发的 `avail` 是唯一缺失真值
+  - 缺失模态在进入 `MLP_m` 之前，整条向量替换为 `fill_m`
+  - `--concat_impute zero`：`fill_m = 0`
+  - `--concat_impute mean`：每个 fold 训练开始前，只用当前 fold 训练集上该模态可用样本算一次池化特征均值，写入 `register_buffer`
+  - val / test 直接读 buffer，不重算
+  - `MLP_m = Linear -> LayerNorm -> ReLU -> Dropout -> Linear -> ReLU`
+  - LayerNorm 放在第一个 Linear 之后
+  - 不拼接缺失指示位、mask embedding、模态 ID
+  - 不对输入特征做逐维 z-score
+- 原因：
+  - 填充如果放到 MLP 之后，带 bias 的线性层会把零输入映射成常数向量，等价于隐式 missing token
+  - LayerNorm 如果放到填充和 Linear 之间，会把 `zero` 和 `mean` 抹平
+
+### 1.4 生存头改成 fuse_fc + classifier
+- 文件：`models/missing_modality_baselines/concat.py`
+- 原来：
+  - 初版用 `CoxHead(mmhid -> mmhid -> 1)`，等于在一层 `fuse_fc` 后再叠一层隐藏层
+- 现在：
+  - `h = concat(h_w, h_g, h_c)`，形状 `(B, 384)`
+  - `fuse_fc`：`Linear(384, 256) -> ReLU -> Dropout -> Linear(256, 256) -> ReLU -> Dropout`
+  - `classifier`：`Linear(256, 1)` 出 Cox risk
+- 原因：
+  - 对齐主模型的生存头形式
+  - concat 先拼三路 `h_m`，所以 `fuse_fc` 输入维是 `3 * 128`，不是主模型的 `128`
+
+## 2. MVAE（`--modality mvae_poe`）
+
+### 2.1 保留 MultiVae 的 MVAE 机制，改走本项目训练循环
+- 文件：
+  - `models/missing_modality_baselines/vae_family.py`
+  - `models/missing_modality_baselines/third_party/MultiVae/src/multivae/models/mvae/mvae_model.py`
+  - `utils/core_utils.py`
+- 原来：
+  - 原始 MVAE 用 MultiVae 自带 trainer
+  - encoder / decoder 面向像素或原始 token
+  - 没有 Cox 生存头
+- 现在：
+  - 直接实例化第三方 `MVAE`
+  - 不使用 MultiVae trainer，改走本项目 `_train_val_test`
+  - 保留 Product-of-Experts 联合后验
+  - 保留 subset ELBO：joint + unimodal + 随机 subset
+  - `use_subsampling=True`
+  - `k_subsets=2`
+  - 保留 beta warmup，`warmup=10`，`beta=1.0`
+  - 总 loss = ELBO + `1.0 * L_cox`
+- 原因：
+  - 需要把原生 MVAE 接到本项目的冻结特征和生存任务上
+  - 聚合规则仍用原实现，不改写成主模型 Generalized PoE
+
+### 2.2 输入预处理和缺失 mask
+- 文件：`models/missing_modality_baselines/vae_family.py`
+- 原来：
+  - MultiVae 要求定长 `data[m]`，并用 `masks` 表示缺失
+- 现在：
+  - WSI：
+    - `(n_patch, 1024)` 先过主模型同结构的 `WSIMILResampler`，得到 `(B, 16, 768)`
+    - 再过 `WSITargetPoolingHead`，得到 `(B, 768)`
+    - 这不是 masked mean pooling
+  - Gene：flatten 成 `(B, 4 * 768)`
+  - Clinic：flatten 成 `(B, n_c * 512)`
+  - `avail` 转成 MultiVae 的 `masks`
+  - 缺失模态在 `data[m]` 里填同 shape 的零占位，只满足 shape contract，不是 concat 那种补值语义
+- 原因：
+  - MultiVae 的 MLP encoder 吃不了变长 patch
+  - WSI 压成定长的方式和主模型一致：resampler + 独立 `wsi_target` 头，权重独立训练
+
+### 2.3 encoder / decoder 仍用 MultiVae 默认 MLP
+- 文件：
+  - `models/missing_modality_baselines/vae_family.py`
+  - `models/missing_modality_baselines/third_party/MultiVae/src/multivae/models/nn/default_architectures.py`
+- 原来：
+  - MultiVae 默认 `Encoder_VAE_MLP` / `Decoder_AE_MLP`
+- 现在：
+  - 仍然用这套默认 MLP
+  - encoder：冻结特征 / 压扁后的 WSI 向量 -> `(B, 128)` 对角高斯
+  - decoder 重建目标：
+    - WSI：`(B, 768)`，也就是 `WSITargetPoolingHead` 的输出，不是原始 `(n_patch, 1024)`
+    - Gene / Clinic：flatten 后的冻结特征
+  - decoder 末端仍带 Sigmoid
+- 原因：
+  - 当前实现先把原生 MVAE 接到冻结特征和 Cox 头上
+  - 没有把 encoder / decoder 替换成主模型的 `TokenSetEncoder` / `ModalityDecoder`
+
+### 2.4 生存头
+- 文件：`models/missing_modality_baselines/vae_family.py`
+- 原来：
+  - 原生 MVAE 没有生存头
+- 现在：
+  - 从 MVAE 的 joint posterior 采样 `z`
+  - `CoxHead`：`Linear(128, 256) -> ReLU -> Dropout -> Linear(256, 1)`
+  - 这和主模型 `fuse_fc + classifier` 不是同一套结构
+- 原因：
+  - 只在 joint latent 上挂一个 Cox 头，让生成式目标和生存目标一起训练
+
+## 3. MoPoE（`--modality mopoe`）
+
+### 3.1 与 MVAE 共用同一套 wrapper，只换模型类
+- 文件：`models/missing_modality_baselines/vae_family.py`
+- 原来：
+  - 原始 MoPoE 也是独立的 MultiVae 模型 + 自带 trainer
+- 现在：
+  - `MVAEBaseline` 和 `MoPoEBaseline` 共用 `_SurvivalMultiVAEBase`
+  - 同一套 WSI resampler / `wsi_target` 头
+  - 同一套 MultiVae 默认 encoder / decoder
+  - 同一套 `avail -> masks` 转换
+  - 同一套 Cox 头和 `lambda_surv = 1.0`
+  - 唯一差别是模型类：`MVAE` vs `MoPoE`
+  - MoPoE 设置 `modalities_specific_dim=None`，不启用模态私有 latent
+- 原因：
+  - 对照应只落在聚合规则上：vanilla PoE vs 先 subset PoE 再 MoE
+
+### 3.2 保留 MoPoE 原生两级聚合
+- 文件：`models/missing_modality_baselines/third_party/MultiVae/src/multivae/models/mopoe/mopoe_model.py`
+- 原来：
+  - 先对每个非空模态子集做 PoE，再对所有子集后验做 MoE
+  - `joint_elbo` 按 mixture 权重聚合
+- 现在：
+  - 这部分原实现未改
+  - incomplete 数据时，subset 可用性由 `masks` 过滤
+  - `masks` 来自本项目 dataloader 的 `avail`
+- 原因：
+  - L3 聚合机制保持原样，只替换输入特征和生存头
+
+## 4. HGCN
+
+### 4.1 输入维度改造
 - 文件：`models/missing_modality_baselines/third_party/HGCN/HGCN_code/mae_model.py`
 - 原来：
   - `fusion_model_mae_2.__init__(in_feats, ...)`
@@ -20,7 +186,7 @@
   - `z_temp/Table2/部署指南.md` 明确要求 HGCN 三路输入维度改为 `1024 / 768 / 512`
   - 这里只改输入维度，不改图卷积、池化、MAE、Mixer、输出结构
 
-### 1.2 HGCN 训练入口参数同步
+### 4.2 HGCN 训练入口参数同步
 - 文件：`models/missing_modality_baselines/third_party/HGCN/HGCN_code/train.py`
 - 原来：
   - 实例化模型时传 `in_feats=1024`
@@ -33,7 +199,7 @@
   - 与 1.1 的模型签名保持一致
   - 只改实例化参数，不改训练流程
 
-### 1.3 HGCN split 读取方式改造
+### 4.3 HGCN split 读取方式改造
 - 文件：`models/missing_modality_baselines/third_party/HGCN/HGCN_code/train.py`
 - 原来：
   - 固定 split 来自 `seed_fit_split.pkl`
@@ -48,202 +214,71 @@
   - 你上一轮明确要求这两个模型只用 csv split
   - 这里只改 split 来源，不改 fold 训练逻辑
 
-### 1.4 HGCN 图构造重建为脚本
-- 文件：`models/missing_modality_baselines/third_party/HGCN/generate_survpgc_graph.py`
-- 原来：
-  - 仓库里只有原始 `gendata.ipynb` 思路
-  - 没有针对当前 SurvPGC 特征目录的可执行图构造脚本
-- 现在：
-  - 新增一个独立脚本，把当前项目的冻结特征重建成 HGCN 需要的 `Data(...)`
-  - 脚本输出：
-    - `patients.pkl`
-    - `sur_and_time.pkl`
-    - `all_data.pkl`
-- 具体做了什么：
-  - WSI：
-    - 从 `SurvPGC_Workspace/<study>/P/uni_v1_h5` 读 `.h5`
-    - 读取 `features`
-    - 读取 `coords`
-    - 断言 `coords.shape[0] == features.shape[0]`
-    - 用 `coords` 按 8 邻域建 `edge_index_image`
-  - Gene：
-    - 从 `SurvPGC_Workspace/<study>/G/scFoundation_embedding_gene_raw/<case_id>.pt` 读
-    - 保持 `(4, 768)`
-    - 生成全连接去自环 `edge_index_rna`
-  - Clinic：
-    - 从 `SurvPGC_Workspace/<study>/C/L4/<case_id>.pt` 读
-    - 保持 `(n_c, 512)`
-    - 生成全连接去自环 `edge_index_cli`
-  - 同时写入：
-    - `data_id`
-    - `sur_type`
-    - `surv_time`
-    - `data_type=['img','rna','cli']`
-    - `edge_index_model`
-- 原因：
-  - 你问得对，这一步不是“小调整”，而是把当前项目特征重新封装成 HGCN 的原生图输入
-  - 我之前在 md 里提到了“新增脚本”，但没有把脚本里每一处实际构造动作展开写清楚，这里补全
+### 4.4 HGCN 图构造改成原生三模态 pkl
+- 文件：`SurvPGC_Workspace/HGCN data gen.md`
+- 原来：把 UNI / scFoundation / CONCH embedding 转成按病人 `.pt` 图
+- 现在：三个模态从原始数据写成 `hgcn data/` 下的目录级 pkl
 
-## 2. Flex-MoE
-
-### 2.1 不是“新增 WSI 分支”，而是“新增 SurvPGC 数据路由”
-- 文件：`models/missing_modality_baselines/third_party/flex-moe/data.py`
-- 原来：
-  - 这个第三方 dataloader 只支持它原生的
-    - ADNI 路由
-    - MIMIC 路由
-  - ADNI 的 image 分支是给它自己的影像数据准备的，不是给当前 SurvPGC 的 WSI/Gene/Clinic 冻结特征准备的
-- 现在：
-  - 我新增的是 `load_and_preprocess_survpgc_data()`
-  - 它的含义是：
-    - 给 Flex-MoE 增加一个“当前项目数据格式”的加载分支
-    - 不是增加一个新的模型结构分支
-    - 也不是替换它原有的 MoE 主体
-- 原因：
-  - ADNI / MIMIC 原 loader 读取的是它原论文自己的数据格式
-  - 当前项目要喂给它的是 SurvPGC 的三模态冻结特征，所以必须单独加一个“数据接线分支”
-
-### 2.2 Flex-MoE 的 WSI 输入怎么改的
-- 文件：`models/missing_modality_baselines/third_party/flex-moe/data.py`
-- 原来：
-  - ADNI image 分支有两种：
-    - 预处理影像表格特征直接进 `PatchEmbeddings`
-    - 原始 3D 影像走 `Custom3DCNN -> PatchEmbeddings`
-- 现在：
-  - 在新的 SurvPGC 数据路由里，WSI 不再走 `Custom3DCNN`
-  - 改成：
-    - 从 `SurvPGC_Workspace/<study>/P/uni_v1` 读取每张 slide 的 patch 特征 `(n_patch, 1024)`
-    - 同一 case 若有多张 slide，就把这些 slide 的 patch 特征先拼起来
-    - 然后对 patch 维做 mean pooling
-    - 得到 case 级 WSI 向量 `(1024,)`
-    - batch 后就是 `(B, 1024)`
-    - 再送入原始 `PatchEmbeddings(1024, num_patches, hidden_dim)`
-- 原因：
-  - `z_temp/Table2/部署指南.md` 对 Flex-MoE 的明确要求是：
-    - WSI 先压成定长 `(B, 1024)`
-    - 然后再进 `PatchEmbeddings`
-  - 这里的 pooling 只发生在 WSI
-  - 这一步不是 flatten
-
-### 2.3 Flex-MoE 的 Gene 输入怎么改的
-- 文件：`models/missing_modality_baselines/third_party/flex-moe/data.py`
-- 原来：
-  - ADNI genomic 分支读它自己的 `h5ad`
-- 现在：
-  - 改成从
-    - `SurvPGC_Workspace/<study>/G/scFoundation_embedding_gene_raw/<case_id>.pt`
-    - 读取 `(4, 768)`
-  - 然后 reshape / flatten 成 `(3072,)`
-  - batch 后就是 `(B, 3072)`
-  - 再送入原始 `PatchEmbeddings(3072, num_patches, hidden_dim)`
-- 原因：
-  - guide 要求 Gene 对 Flex-MoE 走
-    - `flatten -> (B, 3072) -> PatchEmbeddings`
-
-### 2.4 Flex-MoE 的 Clinic 输入怎么改的
-- 文件：`models/missing_modality_baselines/third_party/flex-moe/data.py`
-- 原来：
-  - ADNI clinical 分支读它自己的 clinical csv
-- 现在：
-  - 改成从
-    - `SurvPGC_Workspace/<study>/C/L4/<case_id>.pt`
-    - 读取 `(n_c, 512)`
-  - 然后 flatten 成 `(n_c * 512,)`
-  - batch 后是 `(B, n_c * 512)`
-  - 再送入原始 `PatchEmbeddings(n_c * 512, num_patches, hidden_dim)`
-- 原因：
-  - guide 要求 Clinic 对 Flex-MoE 走
-    - `flatten -> (B, n_c * 512) -> PatchEmbeddings`
-
-### 2.5 Flex-MoE 的“pooling”和“flatten”不是同一件事
-- WSI：
-  - 先从变长 patch 序列 `(n_patch, 1024)` 做 mean pooling
-  - 结果是定长 `(1024,)`
-  - 这里没有 flatten 的意义，因为 pooling 后已经是一维向量
-- Gene：
-  - 输入本来是 `(4, 768)`
-  - 这里没有 pooling，只有 flatten
-  - 输出是 `(3072,)`
-- Clinic：
-  - 输入本来是 `(n_c, 512)`
-  - 这里也没有 pooling，只有 flatten
-  - 输出是 `(n_c * 512,)`
-- 原因：
-  - guide 对三种模态的处理要求本来就不同
-  - 我之前总结得太压缩，导致“WSI 也 flatten 了”的阅读印象不清楚，这里明确分开写
-
-### 2.6 Flex-MoE 的 split 输入怎么改的
-- 文件：`models/missing_modality_baselines/third_party/flex-moe/data.py`
-- 原来：
-  - 用 `json` split
-- 现在：
-  - 用 csv split
-  - 读取列：
-    - `train`
-    - `val`
-    - `test`
-- 原因：
-  - 这是你上一轮明确要求的改动
-
-### 2.7 Flex-MoE 主入口怎么改的
-- 文件：`models/missing_modality_baselines/third_party/flex-moe/main.py`
-- 原来：
-  - `--data` 默认 `adni`
-  - 没有当前项目数据源路由
-  - 没有 `--study`
-  - 没有 `--split_csv`
-- 现在：
-  - 新增 `--study`
-  - 已有的 `--split_csv` 被真正用于 `survpgc` 路由
-  - `train_and_evaluate()` 里新增：
-    - `if args.data == 'survpgc': ...`
-  - 若 `args.data == 'survpgc' and args.modality == 'IGCB'`
-    - 自动改成 `WGC`
-  - 若 `args.data == 'survpgc' and not args.split_csv`
-    - 直接报错
-- 原因：
-  - `IGCB` 是原论文 4 模态命名
-  - 当前项目只有三模态 WSI/Gene/Clinic，所以要切到 `WGC`
-  - `split_csv` 必须显式给，不然第三方脚本不知道当前跑哪一折
-
-### 2.8 Flex-MoE 里没有改动的部分
-- 文件：`models/missing_modality_baselines/third_party/flex-moe/models.py`
-- 保持不动：
-  - `FlexMoE`
-  - `TransformerEncoderLayer`
-  - `FMoETransformerMLP`
-  - `AddtionalNoisyGate`
-  - `PatchEmbeddings`
-  - `missing_embeds`
-  - `expert_indices -> router -> gate_loss`
-- 原因：
-  - 你的要求是“除了输入形状之外，其他结构都不能动”
-  - 这部分我没有改
-
-## 3. 运行路径兼容
-
-### 3.1 third_party 子目录下直跑时的 import 路径
+### 4.5 HGCN GraphData 不再把缓存图钉在 GPU 上
 - 文件：
-  - `models/missing_modality_baselines/third_party/flex-moe/data.py`
-  - `models/missing_modality_baselines/third_party/flex-moe/main.py`
-  - `models/missing_modality_baselines/third_party/HGCN/generate_survpgc_graph.py`
+  - `simple_graph.py`
+  - `models/missing_modality_baselines/third_party/HGCN/HGCN_code/train.py`
 - 原来：
-  - 这些脚本默认只按第三方目录自身的相对路径跑
+  - `GraphData.to(device)` 原地改 `all_data[id]` 里的 tensor
+  - 训练/验证/测试每扫过一个病人，这张图就留在 GPU 上直到进程退出
 - 现在：
-  - 在文件顶部补了 repo root 到 `sys.path`
+  - `to(device)` 返回一份拷贝，CPU 缓存图保持不动
+  - 训练循环继续写 `graph = all_data[id].to(device)`
 - 原因：
-  - 新增代码引用了当前仓库的
-    - `dataset_deployment`
-    - `utils`
-  - 不补路径会 import 失败
+  - 原实现会把整个队列的图逐渐堆进显存，batch 还没到 32 就先 OOM
 
-## 4. 验证
+### 4.6 HGCN 使用独立 batch size=32
+- 文件：
+  - `configs/presets.sh`
+  - `configs/z_exp_gen/gen_Table2_missing_modality_baselines.sh`
+  - `configs/z_exp_gen/gen_Table3_missing_rate_test.sh`
+- 原来：
+  - Table2 / Table3 生成脚本默认 `BATCH_SIZE=128`
+  - HGCN 也吃到同一个值
+- 现在：
+  - `apply_preset hgcn` 把 `BATCH_SIZE` 固定成 `32`
+  - 生成脚本给 HGCN 再写一行 `BATCH_SIZE=32`
+- 原因：
+  - 原始 HGCN 论文代码默认 `batch_size=32`
+  - 仓库里的 `4096` 是 MIL patch 采样数 `NUM_PATCHES`，不是 HGCN 的病人级 batch
+  - `128` 是本仓库 MIL / concat / VAE 对照的默认值，不能直接套到 HGCN 图训练上
 
-- 已执行：
-  - `python -m py_compile`
-- 通过文件：
-  - `third_party/HGCN/HGCN_code/mae_model.py`
-  - `third_party/HGCN/HGCN_code/train.py`
-  - `third_party/HGCN/generate_survpgc_graph.py`
-  - `third_party/flex-moe/data.py`
-  - `third_party/flex-moe/main.py`
+### 4.7 HGCN event 编码改成 1=event
+- 文件：
+  - `models/missing_modality_baselines/native_hgcn/pack.py`
+  - `models/missing_modality_baselines/hgcn_graph_build.py`
+- 原来：
+  - `sur_type` / `sur_and_time[0]` 直接写 metadata 的 `censorship`
+  - TCGA 口径是 `1=censored`，HGCN Cox / C-index 却按 `1=event` 用
+- 现在：
+  - 统一写成 `event = 1 - censorship`
+  - pack summary 明确记录 `1=event, 0=censored`
+- 原因：
+  - 原来所有删失病人都被当成事件，C-index 和 Cox 权重都是反的
+
+### 4.8 HGCN 空图前向不再走 SAGEConv
+- 文件：`models/missing_modality_baselines/third_party/HGCN/HGCN_code/mae_model.py`
+- 原来：
+  - `use_type` 里有 `img` 时，即使 `x_img` 是 `(0, 1024)` 也会进 `SAGEConv`
+  - 空 `batch` 再进 `GlobalAttention` 会直接崩
+- 现在：
+  - 0 节点模态改成 1 行零向量占位，跳过 GNN / pooling
+  - MAE 仍按 `train_use_type` 对齐三路 token
+- 原因：
+  - 缺失 WSI 的病人现在是合法输入，不能因为空图把训练打掉
+
+### 4.9 HGCN split 只保留组装到的病人
+- 文件：`models/missing_modality_baselines/third_party/HGCN/HGCN_code/train.py`
+- 原来：
+  - `if_fit_split=True` 时直接读 `splits_{fold}.csv`
+  - csv 里有、图没装出来的 id 会在 `all_data[id]` 处 KeyError
+- 现在：
+  - train / val / test 都和组装结果做交集
+  - 某一 split 交完是空集才报错
+- 原因：
+  - 原生 HGCN pkl 覆盖率和 csv split 并不完全重合

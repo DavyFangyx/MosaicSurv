@@ -1,6 +1,9 @@
 #!/bin/bash
 # configs/z_exp_gen/Table1_cindex_main/gen_ours/_common.bash
-# 共享的 SurvTriPoEVAE A/B/C 与 B_nopretrain 配置生成逻辑。
+# 共享的 SurvTriPoEVAE 配置生成逻辑。
+# Cfilm 已提升为主模型：POE 家族只生成 survtri_poe_vae_C_film，
+# 其余 A/B/C 系变体全部注释（消融见 Table4_Abaltion_Test）。
+# C_film 的公共超参统一来自 configs/z_exp_gen/cfilm_hparams.sh。
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     cat <<'EOF'
@@ -19,12 +22,21 @@ EOF
     exit 2
 fi
 
+# Cfilm 公共超参（C 系 preset 使用；Test1-4 共用单一来源）
+# shellcheck disable=SC1090
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../cfilm_hparams.sh"
+
 generate_poe_model_val_configs() {
     : "${STUDY:?STUDY is required}"
     : "${EXP_GROUP:?EXP_GROUP is required}"
 
     local script_dir out_dir clinic_experiment gene_experiment wsi_experiment
     local batch_size batch_size_stage1
+    local model_b_lr model_b_lr_stage1 model_b_reg
+    local model_b_beta model_b_dropout model_b_mmhid model_b_decoder_hidden_dim
+    local model_b_encoder_lr_ratio
+    local model_c_batch_size model_c_lr model_c_reg
+    local model_c_beta model_c_lambda model_c_betafix
     local max_epochs max_epochs_stage1 warmup_epochs run_name_base file_prefix exp_group_prefix
     local seq created skipped preset fname target
 
@@ -38,6 +50,22 @@ generate_poe_model_val_configs() {
     max_epochs="${MAX_EPOCHS:-20}"
     max_epochs_stage1="${MAX_EPOCHS_STAGE1:-10}"
     warmup_epochs="${WARMUP_EPOCHS:-3}"
+    # model_b_lr="${MODEL_B_LR:-6e-4}"
+    # model_b_lr_stage1="${MODEL_B_LR_STAGE1:-8e-5}"
+    # model_b_reg="${MODEL_B_REG:-7e-5}"
+    # model_b_beta="${MODEL_B_POE_BETA_TARGET:-0.0164}"
+    # model_b_dropout="${MODEL_B_POE_MODALITY_DROPOUT:-0.25}"
+    # model_b_mmhid="${MODEL_B_POE_MMHID:-128}"
+    # model_b_decoder_hidden_dim="${MODEL_B_POE_DECODER_HIDDEN_DIM:-512}"
+    # model_b_encoder_lr_ratio="${MODEL_B_POE_ENCODER_LR_RATIO:-0.1}"
+    # model_c_batch_size="${MODEL_C_BATCH_SIZE:-16}"
+    # model_c_lr="${MODEL_C_LR:-1.49e-4}"
+    # model_c_reg="${MODEL_C_REG:-1.25e-5}"
+    # model_c_beta="${MODEL_C_POE_BETA_TARGET:-0.268}"
+    # model_c_lambda="${MODEL_C_POE_SURV_LAMBDA:-0.361}"
+    # model_c_betafix="${MODEL_C_BETAFIX:-true}"
+    # alphafix="${ALPHAFIX:-true}"
+    # alphapgc="${ALPHAPGC:-0.5,0.3,0.2}"
     exp_group_prefix=""
     if [[ "$clinic_experiment" == "L0" ]]; then
         exp_group_prefix="L0_"
@@ -49,11 +77,18 @@ generate_poe_model_val_configs() {
     fi
     file_prefix="${FILE_PREFIX:-${exp_group_prefix}${STUDY#tcga_}_poe_model_val}"
 
+    # Cfilm 已提升为主模型：POE 家族除 C_film 外全部注释不用，
+    # 其余 A/B/C 系变体作为消融对象见 Table4_Abaltion_Test。
     local -a poe_presets=(
-        survtri_poe_vae_A
-        survtri_poe_vae_B
-        survtri_poe_vae_B_nopretrain
-        survtri_poe_vae_C
+#        survtri_poe_vae_A
+#        survtri_poe_vae_B
+#        survtri_poe_vae_C
+#        survtri_poe_vae_B_single
+#        survtri_poe_vae_B_multi
+#        survtri_poe_vae_B_film
+#        survtri_poe_vae_C_single
+#        survtri_poe_vae_C_multi
+        survtri_poe_vae_C_film
     )
 
     mkdir -p "$out_dir"
@@ -77,7 +112,34 @@ generate_poe_model_val_configs() {
         seq=$((seq + 1))
         fname=$(printf "%s__%03d__PCG__%s.conf" "$file_prefix" "$seq" "$preset")
         target="$out_dir/$fname"
-        create_conf "$target" "$(cat <<EOF
+        if [[ "$preset" == survtri_poe_vae_C* ]]; then
+            create_conf "$target" "$(cat <<EOF
+EXP_GROUP=$EXP_GROUP
+RUN_NAME=${run_name_base}__${preset}
+PRESET=$preset
+STUDY=$STUDY
+CLINIC_EXPERIMENT=$clinic_experiment
+GENE_EXPERIMENT=$gene_experiment
+WSI_EXPERIMENT=$wsi_experiment
+BAG_LOSS=cox_surv
+BATCH_SIZE=$CFILM_BATCH_SIZE
+BATCH_SIZE_STAGE1=$batch_size_stage1
+MAX_EPOCHS=$max_epochs
+MAX_EPOCHS_STAGE1=$max_epochs_stage1
+WARMUP_EPOCHS=$warmup_epochs
+LR=$CFILM_LR
+REG=$CFILM_REG
+POE_SURV_LAMBDA=$CFILM_POE_SURV_LAMBDA
+POE_BETA_TARGET=$CFILM_POE_BETA_TARGET
+POE_MODALITY_DROPOUT=$CFILM_POE_MODALITY_DROPOUT
+POE_MMHID=$CFILM_POE_MMHID
+ALPHAFIX=$CFILM_ALPHAFIX
+ALPHAPGC=$CFILM_ALPHAPGC
+BETAFIX=$CFILM_BETAFIX
+EOF
+)"
+        elif [[ "$preset" == survtri_poe_vae_B* ]]; then
+            create_conf "$target" "$(cat <<EOF
 EXP_GROUP=$EXP_GROUP
 RUN_NAME=${run_name_base}__${preset}
 PRESET=$preset
@@ -93,6 +155,37 @@ MAX_EPOCHS_STAGE1=$max_epochs_stage1
 WARMUP_EPOCHS=$warmup_epochs
 EOF
 )"
+            # LR=$model_b_lr
+            # LR_STAGE1=$model_b_lr_stage1
+            # REG=$model_b_reg
+            # POE_BETA_TARGET=$model_b_beta
+            # BETAFIX=$model_c_betafix
+            # POE_MODALITY_DROPOUT=$model_b_dropout
+            # POE_MMHID=$model_b_mmhid
+            # POE_DECODER_HIDDEN_DIM=$model_b_decoder_hidden_dim
+            # POE_ENCODER_LR_RATIO=$model_b_encoder_lr_ratio
+            # ALPHAFIX=$alphafix
+            # ALPHAPGC=$alphapgc
+        else
+            create_conf "$target" "$(cat <<EOF
+EXP_GROUP=$EXP_GROUP
+RUN_NAME=${run_name_base}__${preset}
+PRESET=$preset
+STUDY=$STUDY
+CLINIC_EXPERIMENT=$clinic_experiment
+GENE_EXPERIMENT=$gene_experiment
+WSI_EXPERIMENT=$wsi_experiment
+BAG_LOSS=cox_surv
+BATCH_SIZE=$batch_size
+BATCH_SIZE_STAGE1=$batch_size_stage1
+MAX_EPOCHS=$max_epochs
+MAX_EPOCHS_STAGE1=$max_epochs_stage1
+WARMUP_EPOCHS=$warmup_epochs
+EOF
+)"
+            # ALPHAFIX=$alphafix
+            # ALPHAPGC=$alphapgc
+        fi
     done
 
     echo "Generated $created new configs in $out_dir"

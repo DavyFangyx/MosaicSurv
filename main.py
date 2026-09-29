@@ -6,18 +6,32 @@ import pandas as pd
 import numpy as np
 import pdb
 import os
+import importlib.util
+from pathlib import Path
 from timeit import default_timer as timer
 from datasets.dataset_survival import SurvivalDatasetFactory
 from utils.core_utils import _train_val_test
 from utils.file_utils import _save_pkl
 from utils.general_utils import _get_start_end, _prepare_for_experiment
 from utils.wandb_utils import finish_wandb_run
-from models.missing_modality_baselines.runner import run_hgcn_from_args, run_flex_moe_from_args
 
 from utils.process_args import _process_args
+from utils.missing_mask_protocol import prepare_missing_protocol
+from models.missing_modality_baselines.common import write_eval_subset_outputs
 from warnings import simplefilter
 
 simplefilter(action="ignore",category=FutureWarning)
+
+
+def _load_runner():
+    root = Path(__file__).resolve().parent
+    runner_path = root / "models" / "missing_modality_baselines" / "runner.py"
+    spec = importlib.util.spec_from_file_location("survpgc_missing_baseline_runner", runner_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load runner from {runner_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 def _write_filter_log(args):
     summary = getattr(args.dataset_factory, "wsi_filter_summary", None)
@@ -107,6 +121,10 @@ def main(args):
         save_name = 'test_result.csv'
         
     final_df.to_csv(os.path.join(args.results_dir, save_name))
+    write_eval_subset_outputs(
+        args.results_dir,
+        getattr(args, "_eval_subset_fold_metrics", None) or [],
+    )
 
 
 if __name__ == "__main__":
@@ -114,16 +132,11 @@ if __name__ == "__main__":
 
     #----> read the args
     args = _process_args()
+    args = prepare_missing_protocol(args)
+    runner = _load_runner()
 
     if args.modality == "hgcn":
-        run_hgcn_from_args(args)
-        end = timer()
-        print("finished!")
-        print("end script")
-        print('Script Time: %f seconds' % (end - start))
-        raise SystemExit(0)
-    if args.modality == "flex_moe":
-        run_flex_moe_from_args(args)
+        runner.run_hgcn_from_args(args)
         end = timer()
         print("finished!")
         print("end script")
@@ -159,7 +172,24 @@ if __name__ == "__main__":
             "survtri_mlp_concat",
             "survtri_mlp_mhsa",
             "survtri_poe_vae",
+            "modality_concat",
+            "mvae_poe",
+            "mopoe",
+            "survtri_poe_vae_b_kl",
+            "survtri_poe_vae_b_crossstage1",
             "survtri_poe_vae_b_nopretrain",
+            "survtri_poe_vae_b_single",
+            "survtri_poe_vae_b_multi",
+            "survtri_poe_vae_b_film",
+            "survtri_poe_vae_a_film",
+            "survtri_poe_vae_c_single",
+            "survtri_poe_vae_c_single_enum",
+            "survtri_poe_vae_c_multi",
+            "survtri_poe_vae_c_film",
+            "survtri_poe_vae_c_film_kl",
+            "survtri_poe_vae_c_film_noenum",
+            "survtri_poe_vae_c_film_surv0",
+            "survtri_poe_vae_c_film_beta0",
         ) else False,
         is_survpc = True if args.modality == "survpc" else False,
         is_survpc_f = True if args.modality == "survpc_f" else False,

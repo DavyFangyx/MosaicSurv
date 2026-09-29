@@ -119,7 +119,7 @@ def filter_green_channel(np_img, green_thresh=200, avoid_overmask=True, overmask
 
 def filter_grays(rgb, tolerance=15, output_type="bool"):
     (h, w, c) = rgb.shape
-    rgb = rgb.astype(np.int)
+    rgb = rgb.astype(int)
     rg_diff = abs(rgb[:, :, 0] - rgb[:, :, 1]) <= tolerance
     rb_diff = abs(rgb[:, :, 0] - rgb[:, :, 2]) <= tolerance
     gb_diff = abs(rgb[:, :, 1] - rgb[:, :, 2]) <= tolerance

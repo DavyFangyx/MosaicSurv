@@ -1,5 +1,4 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import copy
 from pathlib import Path
 import torch
@@ -8,6 +7,7 @@ import random
 import math
 import sys
 import argparse
+import importlib.util
 import numpy as np
 import pandas as pd
 import torch.nn as nn
@@ -28,7 +28,94 @@ ROOT_DIR = Path(__file__).resolve().parents[5]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from models.missing_modality_baselines.result_utils import build_results_root, build_seed_dir, build_fold_dir, write_experiment_file
+from missing_baseline_result_utils import build_results_root, build_seed_dir, build_fold_dir, write_experiment_file
+from utils.missing_mask_protocol import avail_to_hgcn_in_mask, load_fold_mask_lookup, unified_mask_csv_path
+from models.missing_modality_baselines.common import (
+    ALL_EVAL_SUBSETS,
+    hgcn_use_type_for_subset,
+    parse_eval_modalities,
+    write_eval_subset_outputs,
+)
+
+
+
+def _requested_eval_subsets(args):
+    return parse_eval_modalities(getattr(args, "eval_modalities", "off"))
+
+
+def _should_write_eval_subsets(args):
+    return bool(parse_eval_modalities(getattr(args, "eval_modalities", "off")))
+
+
+HGCN_FOLD_METRIC_COLUMNS = [
+    "test_cindex",
+    "test_cindex_ipcw",
+    "test_IBS",
+    "test_iauc",
+    "test_iauc_list",
+    "test_loss",
+    "test_BS",
+]
+
+
+def _hgcn_fold_metric_row(test_cindex):
+    return {
+        "test_cindex": test_cindex,
+        "test_cindex_ipcw": 0.0,
+        "test_IBS": 0.0,
+        "test_iauc": 0.0,
+        "test_iauc_list": 0.0,
+        "test_loss": 0.0,
+        "test_BS": 0.0,
+    }
+
+
+def _append_hgcn_subset_row(rows, fold, subset, test_cindex):
+    rows.append({
+        "fold": int(fold),
+        "subset": subset,
+        **_hgcn_fold_metric_row(test_cindex),
+    })
+
+
+def _write_hgcn_fold_test_result(results_root, rows):
+    df = pd.DataFrame(rows, columns=HGCN_FOLD_METRIC_COLUMNS)
+    df.to_csv(Path(results_root) / "test_result.csv")
+
+
+def _load_local(module_name, file_path):
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module from {file_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_HGCN_BASELINE_DIR = ROOT_DIR / "models" / "missing_modality_baselines"
+_hgcn_graph_build = _load_local(
+    "survpgc_hgcn_graph_build",
+    _HGCN_BASELINE_DIR / "hgcn_graph_build.py",
+)
+_hgcn_paths = _load_local(
+    "survpgc_hgcn_paths",
+    _HGCN_BASELINE_DIR / "hgcn_paths.py",
+)
+load_hgcn_graphs_from_dirs = _hgcn_graph_build.load_hgcn_graphs_from_dirs
+hgcn_pack_complete = _hgcn_paths.hgcn_pack_complete
+remap_workspace_path_to_hgcn_data = _hgcn_paths.remap_workspace_path_to_hgcn_data
+
+
+def _infer_hgcn_in_feats(all_data, field, default):
+    for data in all_data.values():
+        x = getattr(data, field, None)
+        if x is None:
+            continue
+        shape = getattr(x, "shape", None)
+        if shape is not None and len(shape) >= 2 and int(shape[-1]) > 0:
+            return int(shape[-1])
+    return int(default)
+
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -37,6 +124,15 @@ def _resolve_split_dir(args, cancer_type):
     if getattr(args, "split_dir", None):
         return args.split_dir
     return os.path.join(args.split_root, f"tcga_{cancer_type.lower()}")
+
+
+def _normalize_study_name(cancer_type):
+    study = str(cancer_type).strip()
+    if not study:
+        raise ValueError("cancer_type is required")
+    if not study.startswith("tcga_"):
+        study = f"tcga_{study}"
+    return study
 
 
 def _load_split_csv(split_csv_path):
@@ -51,6 +147,43 @@ def _load_split_csv(split_csv_path):
         split_df[col].dropna().astype(str).tolist()
         for col in ("train", "val", "test")
     ]
+
+
+def _normalize_hgcn_case_id(case_id):
+    return str(case_id).strip().upper()[:12]
+
+
+def _intersect_split_ids(split_ids, available_ids, split_name, split_csv_path):
+    available = set(str(x) for x in available_ids)
+    kept = [str(case_id) for case_id in split_ids if str(case_id) in available]
+    missing = [str(case_id) for case_id in split_ids if str(case_id) not in available]
+    if not kept:
+        raise ValueError(
+            f"{split_csv_path} {split_name} split has 0 cases after intersecting with assembled HGCN graphs"
+        )
+    if missing:
+        print(
+            f"[HGCN] drop {len(missing)} {split_name} ids missing from assembled graphs; kept={len(kept)}",
+            flush=True,
+        )
+    return kept
+
+
+def _hgcn_in_mask_for_case(args, case_id, *, training):
+    missing_mode = getattr(args, "missing_mode", "model_gen")
+    if missing_mode == "unified_mask_csv":
+        lookup = getattr(args, "_unified_mask_lookup", None)
+        if lookup is None:
+            raise ValueError("unified_mask_csv requires a loaded fold mask lookup.")
+        key = _normalize_hgcn_case_id(case_id)
+        try:
+            avail = lookup[key]
+        except KeyError as exc:
+            raise KeyError(f"Case {key!r} is missing from the unified HGCN mask csv.") from exc
+        return avail_to_hgcn_in_mask(avail, args.train_use_type)
+    if training:
+        return generate_mask(num=len(args.train_use_type))
+    return []
 
 
 
@@ -74,7 +207,8 @@ def prediction(all_data,v_model,val_id,patient_and_time,patient_sur_type,args):
                 use_type_eopch = args.train_use_type
             else:
                 use_type_eopch = graph.data_type
-            out_pre,out_fea,out_att,_ = v_model(graph,args.train_use_type,use_type_eopch,mix=args.mix)
+            mask = _hgcn_in_mask_for_case(args, id, training=False)
+            out_pre,out_fea,out_att,_ = v_model(graph,args.train_use_type,use_type_eopch,mask,mix=args.mix)
             lbl_pred = out_pre[0]
 
             survtime_all.append(patient_and_time[id])
@@ -189,7 +323,7 @@ def train_a_epoch(model,train_data,all_data,patient_and_time,patient_sur_type,ba
         
         iter += 1 
         num_of_model = len(all_data[id].data_type)
-        mask = generate_mask(num=len(args.train_use_type))
+        mask = _hgcn_in_mask_for_case(args, id, training=True)
         
         if len(args.train_use_type) == 1:
             assert args.format_of_coxloss == 'one' and args.add_mse_loss_of_mae == False
@@ -217,7 +351,12 @@ def train_a_epoch(model,train_data,all_data,patient_and_time,patient_sur_type,ba
 
                         
             if args.add_mse_loss_of_mae:
-                 mse_loss_of_mae += args.mse_loss_of_mae_factor * mes_loss_of_mae(input=fea_dict['mae_out'][mask[0]], target=fea_dict['mae_labels'][mask[0]])
+                 mask_bool = torch.as_tensor(mask, dtype=torch.bool, device=device).view(-1)
+                 if bool(mask_bool.any()):
+                     mse_loss_of_mae += args.mse_loss_of_mae_factor * mes_loss_of_mae(
+                         input=fea_dict['mae_out'][mask_bool],
+                         target=fea_dict['mae_labels'][mask_bool]
+                     )
 
             survtime_all.append(patient_and_time[id])
             status_all.append(patient_sur_type[id])
@@ -410,19 +549,53 @@ def main(args):
         "epochs": epochs,
         "lr": lr,
         "format_of_coxloss": format_of_coxloss,
+        "missing_mode": getattr(args, "missing_mode", "model_gen"),
+        "missing_pattern": getattr(args, "missing_pattern", ""),
+        "missing_seed": getattr(args, "missing_seed", getattr(args, "start_seed", 0)),
     })
 
   
     data_pack_dir = getattr(args, "data_pack_dir", None)
-    if data_pack_dir is None:
-        data_pack_dir = str(Path(__file__).resolve().parents[1] / "data_split" / cancer_type)
-    data_pack_dir = Path(data_pack_dir)
-    patients = joblib.load(data_pack_dir / "patients.pkl")
-    sur_and_time = joblib.load(data_pack_dir / "sur_and_time.pkl")
-    all_data = joblib.load(data_pack_dir / "all_data.pkl")
+    if data_pack_dir and hgcn_pack_complete(data_pack_dir):
+        data_pack_dir = Path(data_pack_dir)
+        patients = joblib.load(data_pack_dir / "patients.pkl")
+        sur_and_time = joblib.load(data_pack_dir / "sur_and_time.pkl")
+        all_data = joblib.load(data_pack_dir / "all_data.pkl")
+    else:
+        data_root_dir = getattr(args, "data_root_dir", None)
+        gene_dir = getattr(args, "gene_dir", None)
+        clinic_dir = getattr(args, "clinic_dir", None)
+        if not data_root_dir or not gene_dir or not clinic_dir:
+            raise ValueError(
+                "HGCN reads native modality pkl dirs under hgcn data. "
+                "Pass data_root_dir, gene_dir and clinic_dir, "
+                "or provide a complete --data_pack_dir."
+            )
+        data_root_dir = remap_workspace_path_to_hgcn_data(data_root_dir, ROOT_DIR)
+        gene_dir = remap_workspace_path_to_hgcn_data(gene_dir, ROOT_DIR)
+        clinic_dir = remap_workspace_path_to_hgcn_data(clinic_dir, ROOT_DIR)
+        patients, sur_and_time, all_data = load_hgcn_graphs_from_dirs(
+            _normalize_study_name(cancer_type),
+            data_root_dir=data_root_dir,
+            gene_dir=gene_dir,
+            clinic_dir=clinic_dir,
+            repo_root=ROOT_DIR,
+        )
 
     split_dir = _resolve_split_dir(args, cancer_type)
+    patients = [str(case_id) for case_id in patients if str(case_id) in all_data]
+    if not patients:
+        raise ValueError("HGCN pack has no assembled graphs overlapping patients.pkl")
+    missing_labels = [case_id for case_id in patients if case_id not in sur_and_time]
+    if missing_labels:
+        raise KeyError(f"sur_and_time missing {len(missing_labels)} assembled cases, e.g. {missing_labels[:3]}")
     patient_sur_type, patient_and_time, kf_label = get_patients_information(patients,sur_and_time)
+    n_event = int(sum(int(patient_sur_type[case_id]) == 1 for case_id in patients))
+    n_censored = len(patients) - n_event
+    print(
+        f"[HGCN] event encoding: 1=event, 0=censored; n_event={n_event} n_censored={n_censored} n_graphs={len(patients)}",
+        flush=True,
+    )
 
 
     all_seed_patients = []
@@ -436,6 +609,8 @@ def main(args):
     all_each_model_time = []
     all_fold_each_model_ci = []
     seed_summary_rows = []
+    all_fold_test_rows = []
+    all_eval_subset_rows = []
     ##
 
     all_epoch_val_loss = []
@@ -468,6 +643,7 @@ def main(args):
         val_fold_ci = []
         test_each_model_ci = {'img':[],'rna':[],'cli':[],'imgrna':[],'imgcli':[],'rnacli':[]}
         seed_fold_rows = []
+        eval_subset_rows = []
 
         train_fold_ci=[]
         fold_att_1 = {}
@@ -490,9 +666,9 @@ def main(args):
             print('fold: ',n_fold)
              
             if fusion_model == 'fusion_model_mae_2':
-                model = fusion_model_mae_2(img_in_feats=1024,
-                               rna_in_feats=768,
-                               cli_in_feats=512,
+                model = fusion_model_mae_2(img_in_feats=_infer_hgcn_in_feats(all_data, 'x_img', 1024),
+                               rna_in_feats=_infer_hgcn_in_feats(all_data, 'x_rna', 1024),
+                               cli_in_feats=_infer_hgcn_in_feats(all_data, 'x_cli', 1024),
                                n_hidden=args.n_hidden,
                                out_classes=args.out_classes,
                                dropout=drop_out_ratio,
@@ -503,9 +679,11 @@ def main(args):
 
             
             if args.if_fit_split:
-                train_data, val_data, test_data = _load_split_csv(
-                    os.path.join(split_dir, f"splits_{n_fold-1}.csv")
-                )
+                split_csv_path = os.path.join(split_dir, f"splits_{n_fold-1}.csv")
+                train_data, val_data, test_data = _load_split_csv(split_csv_path)
+                train_data = _intersect_split_ids(train_data, patients, "train", split_csv_path)
+                val_data = _intersect_split_ids(val_data, patients, "val", split_csv_path)
+                test_data = _intersect_split_ids(test_data, patients, "test", split_csv_path)
             else:
                 t_train_data = np.array(patients)[train_index]
                 t_l = []
@@ -514,6 +692,13 @@ def main(args):
                 train_data, val_data ,_ , _ = train_test_split(t_train_data,t_train_data,test_size=0.25,random_state=1,stratify=t_l)         
                 test_data = np.array(patients)[test_index]
 
+            if getattr(args, "missing_mode", "model_gen") == "unified_mask_csv":
+                study_name = getattr(args, "study", None) or _normalize_study_name(cancer_type)
+                mask_csv = unified_mask_csv_path(args, n_fold - 1, study=study_name)
+                args._unified_mask_lookup = load_fold_mask_lookup(mask_csv)
+                print(f"[missing] HGCN unified mask: {mask_csv}")
+            else:
+                args._unified_mask_lookup = None
             print(len(train_data),len(val_data),len(test_data))
             fold_patients.append(train_data)
             fold_patients.append(val_data)
@@ -561,44 +746,44 @@ def main(args):
             val_fold_ci.append(best_val_ci)
             train_fold_ci.append(tmp_train_ci)
 
-            one_model_res = [{},{},{}]
-            two_model_res = [{},{},{}]
+            subset_preds = {name: {} for name in ALL_EVAL_SUBSETS}
             fold_fusion_test_ci = {}
+            requested_subsets = _requested_eval_subsets(args)
             with torch.no_grad():
                 for id in test_data:  
-                    data = all_data[id]
-                    data.to(device)
+                    data = all_data[id].to(device)
                     (one_x,multi_x),fea,(att_1,att_2),_ = t_model(data,args.train_use_type,args.train_use_type,mix=args.mix)
                     gnn_time[id] = one_x.cpu().detach().numpy()[0]
                     fold_fusion_test_ci[id] = one_x.cpu().detach().numpy()[0]
+                    subset_preds["PCG"][id] = one_x.cpu().detach().numpy()[0]
                     print(data.sur_type.cpu().detach().numpy()[0],one_x.cpu().detach().numpy()[0],patient_and_time[id])
                     one_test_feature[id] = {}
-                    for i,type_name in enumerate(['img','rna','cli']):
-                        if type_name in data.data_type:
-                            (one_,_),one_fea,(_,_),_ = t_model(data,args.train_use_type,use_type=[type_name],mix=args.mix)
-                            one_model_res[i][id] = one_.cpu().detach().numpy()[0]
-                            each_model_time[type_name][id] = one_.cpu().detach().numpy()[0]
-
-                    for i,two_type_name in enumerate([['img','rna'],['img','cli'],['rna','cli']]):
-                        (one_,two_),one_fea,(_,_),_ = t_model(data,args.train_use_type,use_type=two_type_name,mix=args.mix)
-                        two_model_res[i][id] = one_.cpu().detach().numpy()[0]
-                        cat_name = two_type_name[0]+two_type_name[1]
-                        each_model_time[cat_name][id] = one_.cpu().detach().numpy()[0]     
-
+                    for subset in requested_subsets:
+                        if subset == "PCG":
+                            continue
+                        use_type = hgcn_use_type_for_subset(subset)
+                        (one_,two_),one_fea,(_,_),_ = t_model(data,args.train_use_type,use_type=use_type,mix=args.mix)
+                        pred = one_.cpu().detach().numpy()[0]
+                        subset_preds[subset][id] = pred
+                        if len(use_type) == 1:
+                            each_model_time[use_type[0]][id] = pred
+                        else:
+                            each_model_time[''.join(use_type)][id] = pred
                     del data        
-            for i,type_name in enumerate(['img','rna','cli']): 
-                t_ci = get_val_ci(one_model_res[i],patient_and_time,patient_sur_type)
-                test_each_model_ci[type_name].append(t_ci)
-                print(len(one_model_res[i]),' ',type_name,' ci:',t_ci)
-                
-            for i,type_name in enumerate([['img','rna'],['img','cli'],['rna','cli']]): 
-                t_ci = get_val_ci(two_model_res[i],patient_and_time,patient_sur_type)
-                cat_name = type_name[0]+type_name[1]
-                test_each_model_ci[cat_name].append(t_ci)
-                print(len(two_model_res[i]),' ',cat_name,' ci:',t_ci)                
+            for subset in requested_subsets or ("PCG",):
+                preds = fold_fusion_test_ci if subset == "PCG" else subset_preds[subset]
+                t_ci = get_val_ci(preds,patient_and_time,patient_sur_type)
+                if subset != "PCG":
+                    legacy = ''.join(hgcn_use_type_for_subset(subset))
+                    if legacy in test_each_model_ci:
+                        test_each_model_ci[legacy].append(t_ci)
+                print(len(preds),' ',subset,' ci:',t_ci)
+                if requested_subsets:
+                    _append_hgcn_subset_row(eval_subset_rows, n_fold - 1, subset, t_ci)
                 
             test_ci = get_val_ci(fold_fusion_test_ci,patient_and_time,patient_sur_type)
             print('all ci:',test_ci)
+            all_fold_test_rows.append(_hgcn_fold_metric_row(test_ci))
 
 
             torch.save(t_model.state_dict(), str(fold_dir / f"{label}_{seed}_{n_fold}.pth"))
@@ -631,6 +816,7 @@ def main(args):
         all_all_ci.append(get_all_ci(gnn_time,patient_and_time,patient_sur_type))
         all_gnn_time.append(gnn_time)
         all_each_model_time.append(each_model_time)
+        all_eval_subset_rows.extend(eval_subset_rows)
         pd.DataFrame(seed_fold_rows).to_csv(seed_dir / "fold_result.csv", index=False)
         joblib.dump(gnn_time, seed_dir / "all_gnn_time.pkl")
         joblib.dump(each_model_time, seed_dir / "all_each_model_time.pkl")
@@ -657,9 +843,12 @@ def main(args):
             print(fold_[type_name])
 
 
-    pd.DataFrame(seed_summary_rows).to_csv(results_root / "test_result.csv", index=False)
+    pd.DataFrame(seed_summary_rows).to_csv(results_root / "seed_summary.csv", index=False)
+    _write_hgcn_fold_test_result(results_root, all_fold_test_rows)
     joblib.dump(all_gnn_time, results_root / "all_gnn_time.pkl")
     joblib.dump(all_each_model_time, results_root / "all_each_model_time.pkl")
+    if _should_write_eval_subsets(args):
+        write_eval_subset_outputs(results_root, all_eval_subset_rows)
     
 def get_params():
     parser = argparse.ArgumentParser()
@@ -687,10 +876,19 @@ def get_params():
     parser.add_argument("--split_root", type=str, default="./splits/5foldcv", help="root directory for split csv files")
     parser.add_argument("--split_dir", type=str, default=None, help="override split directory for one cohort")
     parser.add_argument("--data_pack_dir", type=str, default=None, help="directory containing patients.pkl / sur_and_time.pkl / all_data.pkl")
+    parser.add_argument("--data_root_dir", type=str, default=None, help="HGCN WSI pkl directory, usually hgcn data/<study>/P/kimianet")
+    parser.add_argument("--clinic_dir", type=str, default=None, help="HGCN clinic pkl directory, usually hgcn data/<study>/C/L{k}")
+    parser.add_argument("--gene_dir", type=str, default=None, help="HGCN gene pkl directory, usually hgcn data/<study>/G/msigdb_gsea_families")
     parser.add_argument("--results_dir", type=str, default="./results")
     parser.add_argument("--exp_group", type=str, default="HGCN")
     parser.add_argument("--run_name", type=str, default="default")
     parser.add_argument("--details", type=str, default='', help="Experimental details")
+    parser.add_argument("--missing_mode", type=str, default="model_gen", choices=["model_gen", "unified_mask_csv"])
+    parser.add_argument("--missing_pattern", type=str, default="")
+    parser.add_argument("--missing_seed", type=int, default=None)
+    parser.add_argument("--eval_modalities", type=str, default="off")
+    parser.add_argument("--study", type=str, default=None)
+    parser.add_argument("--k", type=int, default=5)
     args, _ = parser.parse_known_args()
     return args
 

@@ -1,6 +1,8 @@
 #!/bin/bash
 # configs/z_exp_gen/Table4_Abaltion_Test/_common.bash
 # 共享的 Table4_Abaltion_Test 配置生成逻辑。
+# 全部消融 preset 的公共超参（lr/reg/batch/poe_*）统一来自
+# configs/z_exp_gen/cfilm_hparams.sh，与主模型 Cfilm 保持一致。
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     cat <<'EOF'
@@ -19,22 +21,52 @@ EOF
     exit 2
 fi
 
+# Cfilm 公共超参（Test1-4 共用单一来源；全部消融 preset 使用）
+# shellcheck disable=SC1090
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../cfilm_hparams.sh"
+
+normalize_stage1_pool_tag() {
+    local raw_value="$1"
+    local -a studies=()
+    local token study seen
+    for token in ${raw_value//,/ }; do
+        study="${token// /}"
+        [ -z "$study" ] && continue
+        if [[ "$study" != tcga_* ]]; then
+            study="tcga_${study}"
+        fi
+        seen=false
+        for token in "${studies[@]}"; do
+            if [[ "$token" == "$study" ]]; then
+                seen=true
+                break
+            fi
+        done
+        if [ "$seen" = false ]; then
+            studies+=("$study")
+        fi
+    done
+    printf '%s\n' "${studies[@]}"
+}
+
 generate_table4_ablation_test_configs() {
     : "${STUDY:?STUDY is required}"
     : "${EXP_GROUP:?EXP_GROUP is required}"
 
     local script_dir out_dir clinic_experiment gene_experiment wsi_experiment
     local batch_size max_epochs warmup_epochs run_name_base file_prefix
-    local seq created skipped preset fname target gene_tag
+    local seq created skipped preset fname target gene_tag stage1_pool stage1_pool_tag
 
     script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
     out_dir="${OUT_DIR:-$script_dir/configs/queue}"
     clinic_experiment="${CLINIC_EXPERIMENT:-L0}"
     gene_experiment="${GENE_EXPERIMENT:-scFoundation_embedding_cell_norm}"
     wsi_experiment="${WSI_EXPERIMENT:-uni_v1}"
-    batch_size="${BATCH_SIZE:-128}"
+    batch_size="${CFILM_BATCH_SIZE}"
     max_epochs="${MAX_EPOCHS:-20}"
     warmup_epochs="${WARMUP_EPOCHS:-3}"
+    stage1_pool="${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}"
+    stage1_pool_tag=" $(normalize_stage1_pool_tag "$stage1_pool" | tr '\n' ' ') "
 
     case "$gene_experiment" in
         scFoundation_embedding_cell_norm) gene_tag="cell_norm" ;;
@@ -46,10 +78,38 @@ generate_table4_ablation_test_configs() {
 
     run_name_base="${RUN_NAME_BASE:-${STUDY}__${gene_tag}__${wsi_experiment}}"
     file_prefix="${FILE_PREFIX:-Table4_Abaltion_Test_${STUDY#tcga_}_ablation_test}"
+    # FILE_PREFIX 不含 study 时补上，避免 5 个 study 的 conf 同名互踩
+    # （只有第一个 study 会写入，其余全部被 create_conf 跳过）
+    case "$file_prefix" in
+        *"${STUDY#tcga_}"*) ;;
+        *) file_prefix="${file_prefix}_${STUDY#tcga_}" ;;
+    esac
 
-    local -a ablation_presets=(
-        survtri_poe_vae_B_nopretrain
-    )
+    local -a ablation_presets
+    if [[ -n "${PRESETS:-}" ]]; then
+        read -r -a ablation_presets <<< "$PRESETS"
+    else
+        ablation_presets=(
+            survtri_poe_vae_C_single
+            survtri_poe_vae_C_single_enum
+            survtri_poe_vae_C_film_noenum
+            survtri_poe_vae_C_film
+            survtri_poe_vae_C_multi
+            survtri_poe_vae_B_film
+            survtri_poe_vae_A_film
+            survtri_poe_vae_C_film_kl
+            survtri_poe_vae_C_film_beta0
+            survtri_poe_vae_C_film_surv0
+        )
+    fi
+
+    # Cfilm 公共超参（全部消融 preset 与主模型 Cfilm 保持一致；
+    # beta0/surv0 等消融维度由 preset 内部的覆盖逻辑处理）
+    local poe_beta_target="${CFILM_POE_BETA_TARGET}"
+    local poe_surv_lambda="${CFILM_POE_SURV_LAMBDA}"
+    # stage1 预训练 batch 保持历史默认 128，不随 Cfilm 的 stage2 batch 变化
+    local batch_size_stage1="${BATCH_SIZE_STAGE1:-128}"
+    local max_epochs_stage1="${MAX_EPOCHS_STAGE1:-10}"
 
     mkdir -p "$out_dir"
 
@@ -69,6 +129,17 @@ generate_table4_ablation_test_configs() {
     skipped=0
 
     for preset in "${ablation_presets[@]}"; do
+        if [[ "$preset" == "survtri_poe_vae_B_crossstage1" ]]; then
+            local study_tag="$(normalize_stage1_pool_tag "$STUDY")"
+            if [[ "$stage1_pool_tag" != *" $study_tag "* ]]; then
+                continue
+            fi
+        fi
+        local preset_beta="$poe_beta_target"
+        local preset_lambda="$poe_surv_lambda"
+        case "$preset" in
+            survtri_poe_vae_C_film_beta0) preset_beta=0 ;;
+        esac
         seq=$((seq + 1))
         fname=$(printf "%s__%03d__%s.conf" "$file_prefix" "$seq" "$preset")
         target="$out_dir/$fname"
@@ -82,8 +153,20 @@ GENE_EXPERIMENT=$gene_experiment
 WSI_EXPERIMENT=$wsi_experiment
 BAG_LOSS=cox_surv
 BATCH_SIZE=$batch_size
+BATCH_SIZE_STAGE1=$batch_size_stage1
 MAX_EPOCHS=$max_epochs
+MAX_EPOCHS_STAGE1=$max_epochs_stage1
 WARMUP_EPOCHS=$warmup_epochs
+POE_BETA_TARGET=$preset_beta
+POE_SURV_LAMBDA=$preset_lambda
+LR=$CFILM_LR
+REG=$CFILM_REG
+POE_MODALITY_DROPOUT=$CFILM_POE_MODALITY_DROPOUT
+POE_MMHID=$CFILM_POE_MMHID
+ALPHAFIX=$CFILM_ALPHAFIX
+ALPHAPGC=$CFILM_ALPHAPGC
+BETAFIX=$CFILM_BETAFIX
+POE_STAGE1_STUDIES=${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}
 EOF
 )"
     done

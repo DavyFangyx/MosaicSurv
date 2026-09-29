@@ -10,6 +10,7 @@ __pycache__/
 *.zip
 *.rar
 *.log
+*.pkl
 
 # User-requested excluded directories
 datasets_csv/
@@ -24,6 +25,6 @@ configs/done_backup/
 configs/failed/
 configs/queue/
 configs/running/
-configs/done_sigle_multi23_backup
+configs/done_single_multi23_backup
 configs/done_backup
 Modality Ablation/

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pandas as pd
+
 
 TCGA_CASE_RE = re.compile(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", re.IGNORECASE)
 
@@ -49,3 +51,20 @@ def resolve_case_feature_path(
 
     index = case_index if case_index is not None else build_case_feature_index(root)
     return index.get(case_id)
+
+
+def load_patient_allowlist(patient_table_csv: str | Path) -> set[str]:
+    path = Path(patient_table_csv)
+    if not path.exists():
+        raise FileNotFoundError(f'Missing patient table: {path}')
+    table = pd.read_csv(path)
+    if 'submitter_id' not in table.columns:
+        raise ValueError(f'{path} missing submitter_id column')
+    return set(table['submitter_id'].dropna().astype(str).str.upper())
+
+
+def feature_belongs_to_allowlist(file_name: str, allowlist: set[str] | None) -> bool:
+    if not allowlist:
+        return True
+    case_id = extract_case_id_from_feature_name(file_name)
+    return bool(case_id and case_id in allowlist)

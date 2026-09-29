@@ -161,22 +161,35 @@ write_effective_config() {
         LABEL_DIM
         POE_VARIANT
         POE_SURV_LAMBDA
+        POE_ENCODER_LR_RATIO
         POE_MODALITY_DROPOUT
+        MISSING_MODE
+        MISSING_PATTERN
+        MISSING_SEED
+        EVAL_MODALITIES
         POE_DECODER_HIDDEN_DIM
         POE_MMHID
         POE_BETA_TARGET
+        BETAFIX
+        ALPHAFIX
+        ALPHAPGC
         POE_TRANSFORMER_LAYERS
+        POE_STAGE1_STUDIES
         WANDB_MODE
         WANDB_PROJECT
         WANDB_ENTITY
         RETURN_ATTN
         USE_NYSTROM
+        CONCAT_WSI
+        CONCAT_IMPUTE
+        DATA_PACK_DIR_PATH
         LABEL_FILE
         OMICS_DIR
         DATA_ROOT_DIR
         CLINIC_DIR
         GENE_DIR
         SPLIT_DIR
+        DATA_PACK_DIR
         CUDA_VISIBLE_DEVICES
     )
 
@@ -219,6 +232,7 @@ CLINIC_DIR="$(resolve_path_or_default "${CLINIC_DIR_PATH}" "$SCRIPT_DIR/SurvPGC_
 GENE_DIR="$(resolve_path_or_default "${GENE_DIR_PATH}" "$SCRIPT_DIR/SurvPGC_Workspace/${STUDY}/G/${GENE_EXPERIMENT}")"
 CLINICAL_FILE="$SCRIPT_DIR/datasets_csv/clinical_data/${STUDY}_clinical.csv"
 SPLIT_DIR="$(resolve_path_or_default "${SPLIT_DIR_PATH}" "$SCRIPT_DIR/splits/${WHICH_SPLITS}/${STUDY}")"
+DATA_PACK_DIR="${DATA_PACK_DIR_PATH:-}"
 
 EXTRA_ARGS=()
 apply_preset "$PRESET"
@@ -234,20 +248,62 @@ if [ -f "$OUT_DIR/.done" ]; then
     exit 0
 fi
 
+require_path "$SPLIT_DIR" "split_dir"
+
 require_path "$LABEL_FILE" "label_file"
 require_path "$CLINICAL_FILE" "clinical_file"
 require_path "$OMICS_DIR" "omics_dir"
-require_path "$DATA_ROOT_DIR" "data_root_dir"
-require_path "$CLINIC_DIR" "clinic_dir"
-require_path "$GENE_DIR" "gene_dir"
-require_path "$SPLIT_DIR" "split_dir"
+if [ "$MODEL" = "hgcn" ]; then
+    if [ "$WSI_EXPERIMENT" = "uni_v1" ]; then
+        echo "[run.sh] HGCN uses native KimiaNet pkl; overriding WSI_EXPERIMENT=uni_v1 -> kimianet"
+        WSI_EXPERIMENT="kimianet"
+        DATA_ROOT_DIR="$SCRIPT_DIR/SurvPGC_Workspace/${STUDY}/P/${WSI_EXPERIMENT}"
+    fi
+    case "$GENE_EXPERIMENT" in
+        scFoundation*)
+            echo "[run.sh] HGCN uses native MSigDB pkl; overriding GENE_EXPERIMENT=$GENE_EXPERIMENT -> msigdb_gsea_families"
+            GENE_EXPERIMENT="msigdb_gsea_families"
+            GENE_DIR="$SCRIPT_DIR/SurvPGC_Workspace/${STUDY}/G/${GENE_EXPERIMENT}"
+            ;;
+    esac
+    remap_to_hgcn_data() {
+        local src_path="$1"
+        "$PYTHON_BIN" -c 'from pathlib import Path; import sys; repo=Path(sys.argv[1]).resolve(); src=Path(sys.argv[2]).expanduser(); src = src if src.is_absolute() else (repo/src); src=src.resolve(); workspace=(repo/"SurvPGC_Workspace").resolve(); parts=src.relative_to(workspace).parts; parts = parts[1:] if parts and parts[0]=="hgcn data" else parts; print(workspace / "hgcn data" / Path(*parts))' "$SCRIPT_DIR" "$src_path"
+    }
+    HGCN_DATA_ROOT_DIR="$(remap_to_hgcn_data "$DATA_ROOT_DIR")"
+    HGCN_CLINIC_DIR="$(remap_to_hgcn_data "$CLINIC_DIR")"
+    HGCN_GENE_DIR="$(remap_to_hgcn_data "$GENE_DIR")"
+    require_path "$HGCN_CLINIC_DIR" "HGCN remapped clinic_dir"
+    require_path "$HGCN_GENE_DIR" "HGCN remapped gene_dir"
+    if [ ! -d "$HGCN_DATA_ROOT_DIR" ] || [ ! -f "$HGCN_DATA_ROOT_DIR/t_img_fea.pkl" ]; then
+        echo "[run.sh] missing HGCN WSI pkl under $HGCN_DATA_ROOT_DIR; treating WSI as absent" >&2
+    fi
+    if [ ! -f "$HGCN_CLINIC_DIR/x_cli.pkl" ]; then
+        echo "[run.sh] missing HGCN clinic pkl: $HGCN_CLINIC_DIR/x_cli.pkl" >&2
+        echo "[run.sh] run: python SurvPGC_Workspace/generate_hgcn_clinic.py --study $STUDY" >&2
+        exit 2
+    fi
+    if [ ! -f "$HGCN_GENE_DIR/t_rna_fea.pkl" ]; then
+        echo "[run.sh] missing HGCN gene pkl: $HGCN_GENE_DIR/t_rna_fea.pkl" >&2
+        echo "[run.sh] run: python SurvPGC_Workspace/generate_hgcn_rna_graph.py --study $STUDY" >&2
+        exit 2
+    fi
+    DATA_ROOT_DIR="$HGCN_DATA_ROOT_DIR"
+    CLINIC_DIR="$HGCN_CLINIC_DIR"
+    GENE_DIR="$HGCN_GENE_DIR"
+    ENCODING_DIM="${ENCODING_DIM:-1024}"
+else
+    require_path "$DATA_ROOT_DIR" "data_root_dir"
+    require_path "$CLINIC_DIR" "clinic_dir"
+    require_path "$GENE_DIR" "gene_dir"
 
-INFERRED_WSI_DIM="$(infer_wsi_encoding_dim "$DATA_ROOT_DIR" "$PYTHON_BIN")"
-if [ -z "${ENCODING_DIM:-}" ] || [ "$ENCODING_DIM" = "auto" ]; then
-    ENCODING_DIM="$INFERRED_WSI_DIM"
-elif [ "$ENCODING_DIM" != "$INFERRED_WSI_DIM" ]; then
-    echo "[run.sh] override ENCODING_DIM from $ENCODING_DIM to inferred $INFERRED_WSI_DIM for $DATA_ROOT_DIR"
-    ENCODING_DIM="$INFERRED_WSI_DIM"
+    INFERRED_WSI_DIM="$(infer_wsi_encoding_dim "$DATA_ROOT_DIR" "$PYTHON_BIN")"
+    if [ -z "${ENCODING_DIM:-}" ] || [ "$ENCODING_DIM" = "auto" ]; then
+        ENCODING_DIM="$INFERRED_WSI_DIM"
+    elif [ "$ENCODING_DIM" != "$INFERRED_WSI_DIM" ]; then
+        echo "[run.sh] override ENCODING_DIM from $ENCODING_DIM to inferred $INFERRED_WSI_DIM for $DATA_ROOT_DIR"
+        ENCODING_DIM="$INFERRED_WSI_DIM"
+    fi
 fi
 
 cp "$CONFIG_ABS" "$OUT_DIR/config.snapshot"
@@ -297,6 +353,7 @@ cmd=(
     --wandb_mode "$WANDB_MODE"
     --wandb_project "$WANDB_PROJECT"
     --selected_modalities "$SELECTED_MODALITIES"
+    --missing_mode "$MISSING_MODE"
     --modality "$MODEL"
     --encoding_dim "$ENCODING_DIM"
     "${EXTRA_ARGS[@]}"
@@ -306,13 +363,35 @@ if [ -n "${WANDB_ENTITY}" ]; then
     cmd+=(--wandb_entity "$WANDB_ENTITY")
 fi
 
+if [ -n "${MISSING_PATTERN}" ]; then
+    cmd+=(--missing_pattern "$MISSING_PATTERN")
+fi
+
+if [ -n "${MISSING_SEED}" ]; then
+    cmd+=(--missing_seed "$MISSING_SEED")
+fi
+
+if [ -n "${EVAL_MODALITIES}" ] && [ "${EVAL_MODALITIES}" != "off" ]; then
+    cmd+=(--eval_modalities "$EVAL_MODALITIES")
+fi
+
 append_bool_flag TESTING --testing
 append_bool_flag WEIGHTED_SAMPLE --weighted_sample
 append_bool_flag USE_NYSTROM --use_nystrom
 append_bool_flag SINGLE_USE_INPUT_LN --single_use_input_ln
+append_bool_flag BETAFIX --betafix
+append_bool_flag ALPHAFIX --alphafix
+
+if [ -n "${ALPHAPGC}" ]; then
+    cmd+=(--alphapgc "$ALPHAPGC")
+fi
 
 if [ "${RETURN_ATTN}" = "true" ]; then
     cmd+=(--return_attn True)
+fi
+
+if [ -n "${DATA_PACK_DIR}" ]; then
+    cmd+=(--data_pack_dir "$DATA_PACK_DIR")
 fi
 
 if [ -n "${FUSION}" ] && [ "$MODEL" = "porpoise" -o "$MODEL" = "mcat" ]; then

@@ -133,6 +133,7 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
             rna_manifest="/data/lizhe/Medteam_projects/kindey_cancer_TCGA/gdc_manifest.2026-03-18.111422_Bulk.txt",
             notes=(
                 "Kidney datasets share the same raw root and are split by project.project_id.",
+                "Shared WSI source TCGA-KICH-KIRC-KIRP is filtered by TCGA-KICH_patients.csv.",
             ),
         ),
     ),
@@ -159,6 +160,10 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
             ),
             project_filter=("TCGA-KIRC",),
             rna_manifest="/data/lizhe/Medteam_projects/kindey_cancer_TCGA/gdc_manifest.2026-03-18.111422_Bulk.txt",
+            notes=(
+                "Kidney datasets share the same raw root and are split by project.project_id.",
+                "Shared WSI source TCGA-KICH-KIRC-KIRP is filtered by TCGA-KIRC_patients.csv.",
+            ),
         ),
     ),
     "tcga_kirp": DatasetConfig(
@@ -184,6 +189,10 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
             ),
             project_filter=("TCGA-KIRP",),
             rna_manifest="/data/lizhe/Medteam_projects/kindey_cancer_TCGA/gdc_manifest.2026-03-18.111422_Bulk.txt",
+            notes=(
+                "Kidney datasets share the same raw root and are split by project.project_id.",
+                "Shared WSI source TCGA-KICH-KIRC-KIRP is filtered by TCGA-KIRP_patients.csv.",
+            ),
         ),
     ),
     "tcga_lihc": DatasetConfig(
@@ -332,4 +341,5 @@ def infer_standard_paths(
         "data_root_dir": workspace_root / "P" / wsi_experiment,
         "clinic_dir": workspace_root / "C" / clinic_experiment,
         "gene_dir": workspace_root / "G" / gene_experiment,
+        "patient_table_csv": root / config.patient_table_csv,
     }

@@ -17,6 +17,11 @@ from timm.models.layers import trunc_normal_ as __call_trunc_normal_
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
+def _empty_pool_feature(feature, out_dim):
+    """Keep a 1-row placeholder when a requested modality has 0 nodes."""
+    return torch.zeros((1, int(out_dim)), dtype=feature.dtype, device=feature.device)
+
+
 def reset(nn):
     def _reset(item):
         if hasattr(item, 'reset_parameters'):
@@ -139,6 +144,14 @@ class PretrainVisionTransformerEncoder(nn.Module):
         x = x + self.pos_embed.type_as(x).to(x.device).clone().detach()
 
         B, _, C = x.shape
+        if not torch.is_tensor(mask):
+            mask = torch.as_tensor(mask, dtype=torch.bool, device=x.device)
+        else:
+            mask = mask.to(device=x.device, dtype=torch.bool)
+        if mask.dim() == 3:
+            mask = mask.squeeze(1)
+        elif mask.dim() == 1:
+            mask = mask.unsqueeze(0)
         x_vis = x[~mask].reshape(B, -1, C) # ~mask means visible
 
         for blk in self.blocks:
@@ -310,6 +323,14 @@ class PretrainVisionTransformer(nn.Module):
         x_vis = self.encoder_to_decoder(x_vis) # [B, N_vis, C_d]
 
         B, N, C = x_vis.shape
+        if not torch.is_tensor(mask):
+            mask = torch.as_tensor(mask, dtype=torch.bool, device=x.device)
+        else:
+            mask = mask.to(device=x.device, dtype=torch.bool)
+        if mask.dim() == 3:
+            mask = mask.squeeze(1)
+        elif mask.dim() == 1:
+            mask = mask.unsqueeze(0)
         
         # we don't unshuffle the correct visible token order, 
         # but shuffle the pos embedding accorddingly.
@@ -324,7 +345,7 @@ class PretrainVisionTransformer(nn.Module):
         tmp_x = torch.zeros_like(x).to(device)
         Mask_n = 0
         Truth_n = 0
-        for i,flag in enumerate(mask[0][0]):
+        for i,flag in enumerate(mask[0]):
             if flag:  
                 tmp_x[:,i] = x[:,pos_emd_vis.shape[1]+Mask_n]
                 Mask_n += 1
@@ -346,7 +367,7 @@ class MixerBlock(nn.Module):
     def __init__(self,dim1,dim2):
         super(MixerBlock,self).__init__() 
         
-        self.norm = LayerNorm(dim1)
+        self.norm = nn.LayerNorm(dim2)
         self.mix_mip_1 = Mix_mlp(dim1)
         self.mix_mip_2 = Mix_mlp(dim2)
         
@@ -477,24 +498,36 @@ class fusion_model_mae_2(nn.Module):
         att_2 = []
         pool_x = torch.empty((0)).to(device)
         if 'img' in data_type:
-            x_img = self.img_gnn_2(x_img,edge_index_img) 
-            x_img = self.img_relu_2(x_img)   
-            batch = torch.zeros(len(x_img),dtype=torch.long).to(device)
-            pool_x_img,att_img_2 = self.mpool_img(x_img,batch)
+            if num_img == 0:
+                pool_x_img = _empty_pool_feature(x_img, self.img_gnn_2.out_channels)
+                att_img_2 = torch.zeros((0, 1), device=pool_x_img.device)
+            else:
+                x_img = self.img_gnn_2(x_img,edge_index_img) 
+                x_img = self.img_relu_2(x_img)   
+                batch = torch.zeros(len(x_img),dtype=torch.long).to(device)
+                pool_x_img,att_img_2 = self.mpool_img(x_img,batch)
             att_2.append(att_img_2)
             pool_x = torch.cat((pool_x,pool_x_img),0)
         if 'rna' in data_type:
-            x_rna = self.rna_gnn_2(x_rna,edge_index_rna) 
-            x_rna = self.rna_relu_2(x_rna)   
-            batch = torch.zeros(len(x_rna),dtype=torch.long).to(device)
-            pool_x_rna,att_rna_2 = self.mpool_rna(x_rna,batch)
+            if num_rna == 0:
+                pool_x_rna = _empty_pool_feature(x_rna, self.rna_gnn_2.out_channels)
+                att_rna_2 = torch.zeros((0, 1), device=pool_x_rna.device)
+            else:
+                x_rna = self.rna_gnn_2(x_rna,edge_index_rna) 
+                x_rna = self.rna_relu_2(x_rna)   
+                batch = torch.zeros(len(x_rna),dtype=torch.long).to(device)
+                pool_x_rna,att_rna_2 = self.mpool_rna(x_rna,batch)
             att_2.append(att_rna_2)
             pool_x = torch.cat((pool_x,pool_x_rna),0)
         if 'cli' in data_type:
-            x_cli = self.cli_gnn_2(x_cli,edge_index_cli) 
-            x_cli = self.cli_relu_2(x_cli)   
-            batch = torch.zeros(len(x_cli),dtype=torch.long).to(device)
-            pool_x_cli,att_cli_2 = self.mpool_cli(x_cli,batch)
+            if num_cli == 0:
+                pool_x_cli = _empty_pool_feature(x_cli, self.cli_gnn_2.out_channels)
+                att_cli_2 = torch.zeros((0, 1), device=pool_x_cli.device)
+            else:
+                x_cli = self.cli_gnn_2(x_cli,edge_index_cli) 
+                x_cli = self.cli_relu_2(x_cli)   
+                batch = torch.zeros(len(x_cli),dtype=torch.long).to(device)
+                pool_x_cli,att_cli_2 = self.mpool_cli(x_cli,batch)
             att_2.append(att_cli_2)
             pool_x = torch.cat((pool_x,pool_x_cli),0)
         
@@ -529,13 +562,16 @@ class fusion_model_mae_2(nn.Module):
 
             k=0
             if 'img' in train_use_type and 'img' in use_type:
-                x_img = x_img + mae_x[train_use_type.index('img')] 
+                if num_img > 0:
+                    x_img = x_img + mae_x[train_use_type.index('img')] 
                 k+=1
             if 'rna' in train_use_type and 'rna' in use_type:
-                x_rna = x_rna + mae_x[train_use_type.index('rna')]  
+                if num_rna > 0:
+                    x_rna = x_rna + mae_x[train_use_type.index('rna')]  
                 k+=1
             if 'cli' in train_use_type and 'cli' in use_type:
-                x_cli = x_cli + mae_x[train_use_type.index('cli')]  
+                if num_cli > 0:
+                    x_cli = x_cli + mae_x[train_use_type.index('cli')]  
                 k+=1
             
  
@@ -544,18 +580,30 @@ class fusion_model_mae_2(nn.Module):
 
         
         if 'img' in data_type:
-            batch = torch.zeros(len(x_img),dtype=torch.long).to(device)
-            pool_x_img,att_img_3 = self.mpool_img_2(x_img,batch)
+            if num_img == 0:
+                pool_x_img = _empty_pool_feature(x_img, self.img_gnn_2.out_channels)
+                att_img_3 = torch.zeros((0, 1), device=pool_x_img.device)
+            else:
+                batch = torch.zeros(len(x_img),dtype=torch.long).to(device)
+                pool_x_img,att_img_3 = self.mpool_img_2(x_img,batch)
             att_3.append(att_img_3)
             pool_x = torch.cat((pool_x,pool_x_img),0)
         if 'rna' in data_type:
-            batch = torch.zeros(len(x_rna),dtype=torch.long).to(device)
-            pool_x_rna,att_rna_3 = self.mpool_rna_2(x_rna,batch)
+            if num_rna == 0:
+                pool_x_rna = _empty_pool_feature(x_rna, self.rna_gnn_2.out_channels)
+                att_rna_3 = torch.zeros((0, 1), device=pool_x_rna.device)
+            else:
+                batch = torch.zeros(len(x_rna),dtype=torch.long).to(device)
+                pool_x_rna,att_rna_3 = self.mpool_rna_2(x_rna,batch)
             att_3.append(att_rna_3)
             pool_x = torch.cat((pool_x,pool_x_rna),0)
         if 'cli' in data_type:
-            batch = torch.zeros(len(x_cli),dtype=torch.long).to(device)
-            pool_x_cli,att_cli_3 = self.mpool_cli_2(x_cli,batch)
+            if num_cli == 0:
+                pool_x_cli = _empty_pool_feature(x_cli, self.cli_gnn_2.out_channels)
+                att_cli_3 = torch.zeros((0, 1), device=pool_x_cli.device)
+            else:
+                batch = torch.zeros(len(x_cli),dtype=torch.long).to(device)
+                pool_x_cli,att_cli_3 = self.mpool_cli_2(x_cli,batch)
             att_3.append(att_cli_3)
             pool_x = torch.cat((pool_x,pool_x_cli),0) 
             

@@ -82,8 +82,8 @@ generate_full_model_val_configs() {
     local -a gene_models=(
         mlp_gene
         snn_gene
-        mlp_gene_f
-        snn_gene_f
+        # mlp_gene_f
+        # snn_gene_f
     )
 
     local -a multi_models=(
