@@ -151,14 +151,15 @@ preset 覆盖逻辑写回 0，10 键中其余 9 键与主模型一致）；`mosa
 
 ## 5. 已知影响 / 后续事项
 
-1. **Table1-3 重新生成后会覆盖旧结果目录**：C 系模型的 `RUN_NAME` 未变，重新
+1. **Table1-3 重新生成后会覆盖旧结果目录**：MosaicSurv 系模型的 `RUN_NAME` 未变，重新
    生成并训练会把新超参结果写进旧的 results 目录（旧结果用的是 defaults 超参）。
-   重新跑之前请先备份/移走旧结果，或按需改用 `RESULTS_BASE`
-   （参考 `Cfilm_Hparam_Eval/gen_Table2/3` 的做法）。
-2. **Table4 汇总脚本需适配**：新结果目录没有 run_id 后缀
-   （`results/Table4_Abaltion_Test/<study>__cell_norm__uni_v1/<model>/`），
-   而 `results_display/scripts/Table4_Abaltion_Test.py` 目前按 CSV 的 T4 列
-   run_id glob `{study}__*__{run_id}`，需要小改（例如去掉 run_id 后缀匹配）。
+   2026-09-30 起按此执行：重跑前先把旧结果目录 mv 为 `<模型>_oldhp` 让位
+   （Table1 Ours 5 个、Table2 5 个、Table3 35 个、Table4 138 个已执行）。
+2. **Table4 结果目录带 run_id 后缀**（`results/Table4_Abaltion_Test/<study>__cell_norm__uni_v1__<run_id>/<model>/`，
+   与 `results_display/scripts/Table4_Abaltion_Test.py` 的 glob 一致）。生成器的默认
+   `RUN_NAME` 不带 run_id，生成 conf 时需用 `RUN_NAME_BASE=<study>__cell_norm__uni_v1__<run_id>`、
+   `FILE_PREFIX=Table4_Abaltion_Test_<study>_<run_id>` 环境变量逐 (study, run_id) 驱动
+   （Phase 4 的 150 个重跑 conf 即按此生成）。
 3. **`Cfilm_Hparam_Eval` 子系统保持不变**：其 CSV 清单与 T1/T2/T3 生成器是
    历史多组超参评估流程，未纳入本次修改；`mosaic_hparams.sh` 是四个主实验
    生成器的新入口。
