@@ -1,5 +1,7 @@
 # Model C + FiLM 完整结构
 
+> 正式命名：MosaicSurv（原 Cfilm / survtri_poe_vae_C_film）
+
 对应实现：`SurvTriPoEVAE_CFiLM`（[model_C_film.py](/data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/models/ablation_models/model_C_film.py)）。
 入口类只做三件事：强制 `poe_variant="C"`、挂上 `FiLMHead`、冻结旧的 `fuse_fc / classifier / linear_probe`。骨干与设计说明中的三模态 PoE-VAE 相同，来自 [model_SurvTriPoEVAE.py](/data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/models/model_SurvTriPoEVAE.py)。
 

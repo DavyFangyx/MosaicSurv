@@ -3,15 +3,18 @@ Collect Table 4 ablation c-index comparison tables.
 
 The three ablation tests are defined in z_temp/Table4/ablation_checklist.md:
 
-    A_readout   readout layer x training scheme (c_single, c_single_enum,
-                c_film_noenum, c_film, c_multi)
-    B_training  training paradigm (b_film, a_film)
-    C_loss      joint-loss terms (c_film_kl, c_film_beta0, c_film_surv0)
+    A_readout   readout layer x training scheme (mosaic_surv_single,
+                mosaic_surv_single_enum, mosaic_surv_noenum, mosaic_surv,
+                mosaic_surv_multi)
+    B_training  training paradigm (mosaic_surv_twostage, mosaic_surv_frozen)
+    C_loss      joint-loss terms (mosaic_surv_kl, mosaic_surv_nojeffreys,
+                mosaic_surv_detached; 原 c_film_kl / c_film_beta0 / c_film_surv0)
 
-Every test is compared against the main model `survtri_poe_vae_c_film`
-(first row of each table). The main model (and the whole ablation batch)
-was trained with three hyperparameter settings — the rows with `T4` enabled
-in configs/z_exp_gen/Cfilm_Hparam_Eval/cfilm_table1_hparams.csv — so one
+Every test is compared against the main model `mosaic_surv` (原 Cfilm,
+`survtri_poe_vae_c_film`; first row of each table). The main model (and the
+whole ablation batch) was trained with three hyperparameter settings — the
+rows with `T4` enabled in the legacy manifest
+configs/z_exp_gen/Cfilm_Hparam_Eval/cfilm_table1_hparams.csv — so one
 output folder is written per run_id and each folder holds one c-index table
 per test.
 
@@ -28,7 +31,9 @@ rows are models, columns are the five datasets plus a mean column. Missing
 experiments are written as `-`, so the script can be re-run while training
 results are still arriving. When a main-model result is missing from the
 Table4 batch, it falls back to the legacy Cfilm hparam-eval trees
-(results/Cfilm_Hparam_Eval/Table1_Cindex and results/Cfilm_Hparam_Eval/Table1).
+(results/Cfilm_Hparam_Eval/Table1_Cindex and results/Cfilm_Hparam_Eval/Table1);
+those trees are kept as-is (not renamed), so the fallback lookups still use the
+old Cfilm directory spellings.
 """
 
 from __future__ import annotations
@@ -41,53 +46,62 @@ from pathlib import Path
 
 import pandas as pd
 
+from model_names import display_name
+
 
 GROUP_DIR = "Table4_Abaltion_Test"
 
-MAIN_MODEL = "survtri_poe_vae_c_film"
+MAIN_MODEL = "mosaic_surv"
 MAIN_MODEL_TYPE = "Main"
 
 GROUP_SPECS = {
     "A_readout": [
-        "survtri_poe_vae_c_single",
-        "survtri_poe_vae_c_single_enum",
-        "survtri_poe_vae_c_film_noenum",
-        "survtri_poe_vae_c_multi",
+        "mosaic_surv_single",
+        "mosaic_surv_single_enum",
+        "mosaic_surv_noenum",
+        "mosaic_surv_multi",
     ],
     "B_training": [
-        "survtri_poe_vae_b_film",
-        "survtri_poe_vae_a_film",
+        "mosaic_surv_twostage",
+        "mosaic_surv_frozen",
     ],
     "C_loss": [
-        "survtri_poe_vae_c_film_kl",
-        "survtri_poe_vae_c_film_beta0",
-        "survtri_poe_vae_c_film_surv0",
+        "mosaic_surv_kl",
+        "mosaic_surv_nojeffreys",
+        "mosaic_surv_detached",
     ],
 }
 
-# Older batches spelled the C_loss variants with a double underscore; the
-# current presets use a single one. Accept either directory name and prefer
-# the one that actually produced a test_result.csv.
+# 结果目录已rename为新键；这里保留 Cfilm 时代的旧目录拼写作为回退，便于读取：
+#  - 早期批次的双下划线拼写（survtri_poe_vae_c_film__surv0 / __beta0，目录仍在树上）
+#  - 遗留区 results/Cfilm_Hparam_Eval/ 的旧单下划线拼写
+# 优先取真正写出 test_result.csv 的那个目录。
 MODEL_DIR_VARIANTS = {
-    "survtri_poe_vae_c_film_surv0": [
+    "mosaic_surv_detached": [
+        "mosaic_surv_detached",
         "survtri_poe_vae_c_film_surv0",
         "survtri_poe_vae_c_film__surv0",
     ],
-    "survtri_poe_vae_c_film_beta0": [
+    "mosaic_surv_nojeffreys": [
+        "mosaic_surv_nojeffreys",
         "survtri_poe_vae_c_film_beta0",
         "survtri_poe_vae_c_film__beta0",
     ],
 }
 
+# 遗留区 Cfilm_Hparam_Eval 未改名，主模型目录/run 名仍是旧拼写
+LEGACY_MAIN_MODEL_DIR = "survtri_poe_vae_c_film"
+LEGACY_MAIN_MODEL_RUN_TOKEN = "survtri_poe_vae_C_film"
+
 STUDIES = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc"]
 
+# 行标签用集中映射的论文正式名（Table4 汇总 CSV）
 MODEL_LABELS = {
-    MAIN_MODEL: "c_film",
-    **{
-        model: model.replace("survtri_poe_vae_", "")
-        for models in GROUP_SPECS.values()
-        for model in models
-    },
+    model: display_name(model)
+    for model in {
+        MAIN_MODEL,
+        *(model for models in GROUP_SPECS.values() for model in models),
+    }
 }
 
 
@@ -178,25 +192,33 @@ def legacy_cfilm_result_csvs(
     results_root: Path, study: str, run_id: str, model: str
 ) -> list[Path]:
     """Legacy Cfilm hparam-eval locations (results/Cfilm_Hparam_Eval/...) where
-    the Table1 c-index runs of the main model live. Only `survtri_poe_vae_c_film`
-    was trained there."""
+    the Table1 c-index runs of the main model live. Only the main model was
+    trained there (旧目录名 `survtri_poe_vae_c_film`；该遗留区保持原样、未改名)."""
+    # 遗留区目录名是旧拼写，命中的 model 键要翻译回旧目录名再 glob
+    legacy_names = [model]
+    if model == MAIN_MODEL:
+        legacy_names.append(LEGACY_MAIN_MODEL_DIR)
     paths: list[Path] = []
 
     canonical = results_root / "Cfilm_Hparam_Eval" / "Table1" / run_id
     if canonical.is_dir():
-        paths.extend(sorted(canonical.glob(f"{study}__*/{model}/test_result.csv")))
+        for name in legacy_names:
+            paths.extend(
+                sorted(canonical.glob(f"{study}__*/{name}/test_result.csv"))
+            )
 
     study_tag = study.replace("tcga_", "").upper()
-    run_name = f"{study}__L0__cell_norm__uni_v1__survtri_poe_vae_C_film__{run_id}"
-    paths.append(
-        results_root
-        / "Cfilm_Hparam_Eval"
-        / "Table1_Cindex"
-        / f"L0_{study_tag}_poe_model_val"
-        / run_name
-        / model
-        / "test_result.csv"
-    )
+    run_name = f"{study}__L0__cell_norm__uni_v1__{LEGACY_MAIN_MODEL_RUN_TOKEN}__{run_id}"
+    for name in legacy_names:
+        paths.append(
+            results_root
+            / "Cfilm_Hparam_Eval"
+            / "Table1_Cindex"
+            / f"L0_{study_tag}_poe_model_val"
+            / run_name
+            / name
+            / "test_result.csv"
+        )
     return paths
 
 
@@ -206,9 +228,9 @@ def resolve_result_csv(
     """Locate test_result.csv for one study/model.
 
     The main model prefers the legacy Cfilm hparam-eval trees: its
-    Table4-batch results were overwritten by the c_film_beta0 runs, which
-    shared the same modality results dir (fixed in configs/presets.sh).
-    Other models use the Table4 batch first.
+    Table4-batch results were overwritten by the mosaic_surv_nojeffreys
+    (原 c_film_beta0) runs, which shared the same modality results dir
+    (fixed in configs/presets.sh). Other models use the Table4 batch first.
     """
     model_dir = resolve_model_dir(run_dir, model)
     primary = model_dir / "test_result.csv" if model_dir is not None else None
@@ -334,7 +356,10 @@ def main() -> None:
         "--hparams",
         type=Path,
         default=default_hparams_path(),
-        help="Cfilm hparam manifest; T4-enabled rows select the run_id folders",
+        help=(
+            "Cfilm hparam manifest（遗留区，未改名）; "
+            "T4-enabled rows select the run_id folders"
+        ),
     )
     parser.add_argument(
         "--run-ids",

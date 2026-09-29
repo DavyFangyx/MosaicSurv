@@ -1,9 +1,9 @@
 #!/bin/bash
 # configs/z_exp_gen/Table1_cindex_main/gen_ours/_common.bash
 # 共享的 SurvTriPoEVAE 配置生成逻辑。
-# Cfilm 已提升为主模型：POE 家族只生成 survtri_poe_vae_C_film，
+# MosaicSurv 已提升为主模型：POE 家族只生成 mosaic_surv，
 # 其余 A/B/C 系变体全部注释（消融见 Table4_Abaltion_Test）。
-# C_film 的公共超参统一来自 configs/z_exp_gen/cfilm_hparams.sh。
+# MosaicSurv 的公共超参统一来自 configs/z_exp_gen/mosaic_hparams.sh。
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     cat <<'EOF'
@@ -22,9 +22,9 @@ EOF
     exit 2
 fi
 
-# Cfilm 公共超参（C 系 preset 使用；Test1-4 共用单一来源）
+# MosaicSurv 公共超参（C 系 preset 使用；Test1-4 共用单一来源）
 # shellcheck disable=SC1090
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../cfilm_hparams.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../../mosaic_hparams.sh"
 
 generate_poe_model_val_configs() {
     : "${STUDY:?STUDY is required}"
@@ -77,7 +77,7 @@ generate_poe_model_val_configs() {
     fi
     file_prefix="${FILE_PREFIX:-${exp_group_prefix}${STUDY#tcga_}_poe_model_val}"
 
-    # Cfilm 已提升为主模型：POE 家族除 C_film 外全部注释不用，
+    # MosaicSurv 已提升为主模型：POE 家族除 mosaic_surv 外全部注释不用，
     # 其余 A/B/C 系变体作为消融对象见 Table4_Abaltion_Test。
     local -a poe_presets=(
 #        survtri_poe_vae_A
@@ -85,10 +85,10 @@ generate_poe_model_val_configs() {
 #        survtri_poe_vae_C
 #        survtri_poe_vae_B_single
 #        survtri_poe_vae_B_multi
-#        survtri_poe_vae_B_film
-#        survtri_poe_vae_C_single
-#        survtri_poe_vae_C_multi
-        survtri_poe_vae_C_film
+#        mosaic_surv_twostage
+#        mosaic_surv_single
+#        mosaic_surv_multi
+        mosaic_surv
     )
 
     mkdir -p "$out_dir"
@@ -112,7 +112,18 @@ generate_poe_model_val_configs() {
         seq=$((seq + 1))
         fname=$(printf "%s__%03d__PCG__%s.conf" "$file_prefix" "$seq" "$preset")
         target="$out_dir/$fname"
-        if [[ "$preset" == survtri_poe_vae_C* ]]; then
+        # MosaicSurv 主模型与 C 系消融（single/single_enum/multi/noenum/kl/detached/
+        # nojeffreys）使用 MOSAIC_* 公共超参；twostage(两阶段 B) 与 frozen(预训练冻结 A)
+        # 走各自分支，遗留 survtri_poe_vae_C* preset 保持原行为。
+        if [[ "$preset" == survtri_poe_vae_C* \
+              || "$preset" == mosaic_surv \
+              || "$preset" == mosaic_surv_single \
+              || "$preset" == mosaic_surv_single_enum \
+              || "$preset" == mosaic_surv_multi \
+              || "$preset" == mosaic_surv_noenum \
+              || "$preset" == mosaic_surv_kl \
+              || "$preset" == mosaic_surv_detached \
+              || "$preset" == mosaic_surv_nojeffreys ]]; then
             create_conf "$target" "$(cat <<EOF
 EXP_GROUP=$EXP_GROUP
 RUN_NAME=${run_name_base}__${preset}
@@ -122,23 +133,23 @@ CLINIC_EXPERIMENT=$clinic_experiment
 GENE_EXPERIMENT=$gene_experiment
 WSI_EXPERIMENT=$wsi_experiment
 BAG_LOSS=cox_surv
-BATCH_SIZE=$CFILM_BATCH_SIZE
+BATCH_SIZE=$MOSAIC_BATCH_SIZE
 BATCH_SIZE_STAGE1=$batch_size_stage1
 MAX_EPOCHS=$max_epochs
 MAX_EPOCHS_STAGE1=$max_epochs_stage1
 WARMUP_EPOCHS=$warmup_epochs
-LR=$CFILM_LR
-REG=$CFILM_REG
-POE_SURV_LAMBDA=$CFILM_POE_SURV_LAMBDA
-POE_BETA_TARGET=$CFILM_POE_BETA_TARGET
-POE_MODALITY_DROPOUT=$CFILM_POE_MODALITY_DROPOUT
-POE_MMHID=$CFILM_POE_MMHID
-ALPHAFIX=$CFILM_ALPHAFIX
-ALPHAPGC=$CFILM_ALPHAPGC
-BETAFIX=$CFILM_BETAFIX
+LR=$MOSAIC_LR
+REG=$MOSAIC_REG
+POE_SURV_LAMBDA=$MOSAIC_POE_SURV_LAMBDA
+POE_BETA_TARGET=$MOSAIC_POE_BETA_TARGET
+POE_MODALITY_DROPOUT=$MOSAIC_POE_MODALITY_DROPOUT
+POE_MMHID=$MOSAIC_POE_MMHID
+ALPHAFIX=$MOSAIC_ALPHAFIX
+ALPHAPGC=$MOSAIC_ALPHAPGC
+BETAFIX=$MOSAIC_BETAFIX
 EOF
 )"
-        elif [[ "$preset" == survtri_poe_vae_B* ]]; then
+        elif [[ "$preset" == survtri_poe_vae_B* || "$preset" == mosaic_surv_twostage ]]; then
             create_conf "$target" "$(cat <<EOF
 EXP_GROUP=$EXP_GROUP
 RUN_NAME=${run_name_base}__${preset}

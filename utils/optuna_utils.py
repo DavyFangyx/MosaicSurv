@@ -195,7 +195,7 @@ def sample_survtri_poe_vae_model_b(trial, args):
     return params
 
 
-C_FILM_ALPHAPGC_CHOICES = (
+MOSAIC_SURV_ALPHAPGC_CHOICES = (
     "0.33,0.33,0.33",
     "0.30,0.30,0.40",
     "0.30,0.40,0.30",
@@ -220,7 +220,7 @@ def sample_discrete_poe_alpha(trial):
     }
 
 
-def sample_survtri_poe_vae_model_c_film(trial, args):
+def sample_mosaic_surv_trial(trial, args):
     params = sample_discrete_poe_alpha(trial)
     params.update({
         # 学习率：保留经典量级，覆盖 5e-5 到 1e-3
@@ -235,15 +235,15 @@ def sample_survtri_poe_vae_model_c_film(trial, args):
         "poe_modality_dropout": trial.suggest_categorical("poe_modality_dropout", [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]),
         # 隐层宽度：保留你的备选
         "poe_mmhid": trial.suggest_categorical("poe_mmhid", [128, 256, 384]),
-        # C_film 只有 stage2，真正生效的是 batch_size，不是 batch_size_stage1
+        # MosaicSurv 只有 stage2，真正生效的是 batch_size，不是 batch_size_stage1
         "batch_size": trial.suggest_categorical("batch_size", [16, 32, 64, 128]),
     })
     return params
 
 
 def sample_survtri_poe_vae_trial(trial, args):
-    if args.modality == "survtri_poe_vae_c_film":
-        return sample_survtri_poe_vae_model_c_film(trial, args)
+    if args.modality == "mosaic_surv":
+        return sample_mosaic_surv_trial(trial, args)
     if args.poe_variant == "A":
         return sample_survtri_poe_vae_model_a(trial, args)
     if args.poe_variant == "B":

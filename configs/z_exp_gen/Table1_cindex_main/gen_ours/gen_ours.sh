@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Table1 ours 入口。
-# POE 家族只生成主模型 C_film（其余 A/B/C 系已降级到 Table4 消融）。
-# C_film 公共超参见 configs/z_exp_gen/cfilm_hparams.sh。
+# POE 家族只生成主模型 MosaicSurv（其余 A/B/C 系已降级到 Table4 消融）。
+# MosaicSurv 公共超参见 configs/z_exp_gen/mosaic_hparams.sh。
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 

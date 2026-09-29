@@ -32,6 +32,8 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MultipleLocator
 
+from model_names import FORMAL_NAMES, MAIN_MODEL
+
 plt.style.use("seaborn-v0_8-whitegrid")
 
 GROUP_DIR = "Table3_MissingRate"
@@ -63,16 +65,18 @@ PATTERN_LABELS = {
     "p0_30_30": "0/30/30",
     "p20_20_20": "20/20/20",
 }
+# 官方 Table3 模型清单：Mosaic-Surv、hgcn、modality_concat mean
+# （见 configs/z_exp_gen/gen_Table3_missing_rate_test.sh 的 PRESETS）。
 PREFERRED_MODEL_ORDER = [
-    "survtri_poe_vae_c_film",
+    MAIN_MODEL,
     "hgcn",
 ]
 MODEL_DISPLAY_NAMES = {
-    "survtri_poe_vae_c_film": "Cfilm",
+    MAIN_MODEL: FORMAL_NAMES[MAIN_MODEL],
     "hgcn": "HCGN",
 }
 MODEL_STYLES = {
-    "survtri_poe_vae_c_film": ("o", "-"),
+    MAIN_MODEL: ("o", "-"),
     "hgcn": ("^", "--"),
 }
 EXTRA_MODEL_MARKERS = ["s", "D", "v", "P", "X"]
@@ -333,29 +337,33 @@ def write_stability_summary(
     column_values = {
         MODEL_DISPLAY_NAMES.get(name, name): model_values[name] for name in model_names
     }
-    cfilm_values = column_values.get("Cfilm", {})
-    hgcn_values = column_values.get("HCGN", {})
+    # 列名用集中映射出的正式名（mosaic_surv → "Mosaic-Surv (Ours)"）
+    main_display = MODEL_DISPLAY_NAMES[MAIN_MODEL]
+    hgcn_display = MODEL_DISPLAY_NAMES["hgcn"]
+    delta_display = f"Δ={hgcn_display}-{main_display}"
+    main_values = column_values.get(main_display, {})
+    hgcn_values = column_values.get(hgcn_display, {})
 
     rows: list[dict[str, str]] = []
     for metric_name in metric_names:
         for label in [*dataset_labels, "Mean"]:
-            cfilm = cfilm_values.get(label, {}).get(metric_name)
+            main_value = main_values.get(label, {}).get(metric_name)
             hgcn = hgcn_values.get(label, {}).get(metric_name)
-            if cfilm is None and hgcn is None:
+            if main_value is None and hgcn is None:
                 continue
-            delta = hgcn - cfilm if cfilm is not None and hgcn is not None else None
+            delta = hgcn - main_value if main_value is not None and hgcn is not None else None
             rows.append(
                 {
                     "metric": metric_name,
                     "dataset": label,
-                    "Cfilm": f"{cfilm:.4f}" if cfilm is not None else "",
-                    "HCGN": f"{hgcn:.4f}" if hgcn is not None else "",
-                    "Δ=HCGN-Cfilm": f"{delta:.4f}" if delta is not None else "",
+                    main_display: f"{main_value:.4f}" if main_value is not None else "",
+                    hgcn_display: f"{hgcn:.4f}" if hgcn is not None else "",
+                    delta_display: f"{delta:.4f}" if delta is not None else "",
                 }
             )
 
     out_path = output_dir / "stability_summary.csv"
-    fieldnames = ["metric", "dataset", "Cfilm", "HCGN", "Δ=HCGN-Cfilm"]
+    fieldnames = ["metric", "dataset", main_display, hgcn_display, delta_display]
     with out_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fieldnames)
         writer.writeheader()

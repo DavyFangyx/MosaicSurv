@@ -5,8 +5,8 @@
 # 模型开关：在下面 PRESETS 数组里注释掉哪一行，那个模型就不生成。
 # 命令行仍可用 PRESETS="..." 临时覆盖数组，不改文件。
 #
-# POE 家族只保留主模型 C_film（其余 B/C 系已注释，降级到 Table4 消融）；
-# C_film 的公共超参（lr/reg/batch/poe_*）来自 configs/z_exp_gen/cfilm_hparams.sh。
+# POE 家族只保留主模型 MosaicSurv（其余 B/C 系已注释，降级到 Table4 消融）；
+# MosaicSurv 的公共超参（lr/reg/batch/poe_*）来自 configs/z_exp_gen/mosaic_hparams.sh。
 #
 # 结果矩阵是 7 个测试子集 x N 个方法 x 5 个数据集。
 # 训练任务只有 N 个方法 x 5 个数据集：
@@ -37,11 +37,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 OUT_DIR="${OUT_DIR:-$SCRIPT_DIR/configs/queue}"
 mkdir -p "$OUT_DIR"
 
-# Cfilm 公共超参（C 系 preset 专用；Test1-4 共用单一来源）
+# MosaicSurv 公共超参（C 系 preset 专用；Test1-4 共用单一来源）
 # shellcheck disable=SC1090
-source "$SCRIPT_DIR/configs/z_exp_gen/cfilm_hparams.sh"
+source "$SCRIPT_DIR/configs/z_exp_gen/mosaic_hparams.sh"
 # 追加到 C 系 preset 的 extra_lines 末尾，覆盖主模板里的同名键
-CFILM_EXTRA_LINES=$'LR='"$CFILM_LR"$'\nREG='"$CFILM_REG"$'\nPOE_SURV_LAMBDA='"$CFILM_POE_SURV_LAMBDA"$'\nPOE_BETA_TARGET='"$CFILM_POE_BETA_TARGET"$'\nPOE_MODALITY_DROPOUT='"$CFILM_POE_MODALITY_DROPOUT"$'\nPOE_MMHID='"$CFILM_POE_MMHID"$'\nBATCH_SIZE='"$CFILM_BATCH_SIZE"$'\nALPHAFIX='"$CFILM_ALPHAFIX"$'\nALPHAPGC='"$CFILM_ALPHAPGC"$'\nBETAFIX='"$CFILM_BETAFIX"
+MOSAIC_EXTRA_LINES=$'LR='"$MOSAIC_LR"$'\nREG='"$MOSAIC_REG"$'\nPOE_SURV_LAMBDA='"$MOSAIC_POE_SURV_LAMBDA"$'\nPOE_BETA_TARGET='"$MOSAIC_POE_BETA_TARGET"$'\nPOE_MODALITY_DROPOUT='"$MOSAIC_POE_MODALITY_DROPOUT"$'\nPOE_MMHID='"$MOSAIC_POE_MMHID"$'\nBATCH_SIZE='"$MOSAIC_BATCH_SIZE"$'\nALPHAFIX='"$MOSAIC_ALPHAFIX"$'\nALPHAPGC='"$MOSAIC_ALPHAPGC"$'\nBETAFIX='"$MOSAIC_BETAFIX"
 
 EXP_GROUP="${EXP_GROUP:-Table2_Baselines}"
 
@@ -55,15 +55,15 @@ if [ -n "${PRESETS:-}" ]; then
     read -r -a PRESETS <<< "$PRESETS"
 else
     # 注释掉哪一行，那个模型就不生成。
-    # POE 家族除主模型 C_film 外全部注释不用（B/C 系降级到 Table4 消融）；
+    # POE 家族除主模型 MosaicSurv 外全部注释不用（B/C 系降级到 Table4 消融）；
     # 其余为与 POE 家族无关的缺失模态基线。
     PRESETS=(
 #        survtri_poe_vae_B_single
 #        survtri_poe_vae_B_multi
-#        survtri_poe_vae_B_film
-#        survtri_poe_vae_C_single
-#        survtri_poe_vae_C_multi
-        survtri_poe_vae_C_film
+#        mosaic_surv_twostage
+#        mosaic_surv_single
+#        mosaic_surv_multi
+        mosaic_surv
 #        survtri_poe_vae_B
         modality_concat_zero
         modality_concat_mean
@@ -110,10 +110,10 @@ preset_result_folder() {
         survtri_poe_vae_B) echo "survtri_poe_vae__B" ;;
         survtri_poe_vae_B_single) echo "survtri_poe_vae_b_single" ;;
         survtri_poe_vae_B_multi) echo "survtri_poe_vae_b_multi" ;;
-        survtri_poe_vae_B_film) echo "survtri_poe_vae_b_film" ;;
-        survtri_poe_vae_C_single) echo "survtri_poe_vae_c_single" ;;
-        survtri_poe_vae_C_multi) echo "survtri_poe_vae_c_multi" ;;
-        survtri_poe_vae_C_film) echo "survtri_poe_vae_c_film" ;;
+        mosaic_surv_twostage) echo "mosaic_surv_twostage" ;;
+        mosaic_surv_single) echo "mosaic_surv_single" ;;
+        mosaic_surv_multi) echo "mosaic_surv_multi" ;;
+        mosaic_surv) echo "mosaic_surv" ;;
         modality_concat_zero) echo "modality_concat__resampler__zero" ;;
         modality_concat_mean) echo "modality_concat__resampler__mean" ;;
         *) echo "$preset" ;;
@@ -139,11 +139,11 @@ for study in "${STUDIES[@]}"; do
         gene_tag="$GENE_TAG"
         wsi_experiment="$WSI_EXPERIMENT"
         case "$preset" in
-            survtri_poe_vae_B|survtri_poe_vae_B_single|survtri_poe_vae_B_multi|survtri_poe_vae_B_film)
+            survtri_poe_vae_B|survtri_poe_vae_B_single|survtri_poe_vae_B_multi|mosaic_surv_twostage)
                 extra_lines=$'BAG_LOSS=cox_surv\nBATCH_SIZE_STAGE1='"$BATCH_SIZE_STAGE1"$'\nMAX_EPOCHS_STAGE1='"$MAX_EPOCHS_STAGE1"
                 ;;
-            survtri_poe_vae_C_single|survtri_poe_vae_C_multi|survtri_poe_vae_C_film)
-                extra_lines=$'BAG_LOSS=cox_surv\nBATCH_SIZE_STAGE1='"$BATCH_SIZE_STAGE1"$'\nMAX_EPOCHS_STAGE1='"$MAX_EPOCHS_STAGE1"$'\n'"$CFILM_EXTRA_LINES"
+            mosaic_surv|mosaic_surv_single|mosaic_surv_multi|mosaic_surv_noenum|mosaic_surv_kl|mosaic_surv_detached|mosaic_surv_nojeffreys)
+                extra_lines=$'BAG_LOSS=cox_surv\nBATCH_SIZE_STAGE1='"$BATCH_SIZE_STAGE1"$'\nMAX_EPOCHS_STAGE1='"$MAX_EPOCHS_STAGE1"$'\n'"$MOSAIC_EXTRA_LINES"
                 ;;
             modality_concat_zero)
                 extra_lines=$'CONCAT_WSI=resampler\nCONCAT_IMPUTE=zero'

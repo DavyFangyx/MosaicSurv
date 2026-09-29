@@ -296,8 +296,8 @@ apply_preset() {
             )
             ;;
 
-        survtri_poe_vae_A_film)
-            MODEL="survtri_poe_vae_a_film"
+        mosaic_surv_frozen)
+            MODEL="mosaic_surv_frozen"
             POE_VARIANT="A"
             BAG_LOSS="cox_surv"
             RESULTS_SUBDIR="$MODEL"
@@ -362,8 +362,8 @@ apply_preset() {
                 --batch_size_stage1 "$BATCH_SIZE_STAGE1"
             )
             ;;
-        survtri_poe_vae_B_film)
-            MODEL="survtri_poe_vae_b_film"
+        mosaic_surv_twostage)
+            MODEL="mosaic_surv_twostage"
             POE_VARIANT="B"
             BAG_LOSS="cox_surv"
             RESULTS_SUBDIR="$MODEL"
@@ -384,11 +384,11 @@ apply_preset() {
                 --batch_size_stage1 "$BATCH_SIZE_STAGE1"
             )
             ;;
-        survtri_poe_vae_C_single|survtri_poe_vae_C_single_enum)
-            if [ "$PRESET" = "survtri_poe_vae_C_single_enum" ]; then
-                MODEL="survtri_poe_vae_c_single_enum"
+        mosaic_surv_single|mosaic_surv_single_enum)
+            if [ "$PRESET" = "mosaic_surv_single_enum" ]; then
+                MODEL="mosaic_surv_single_enum"
             else
-                MODEL="survtri_poe_vae_c_single"
+                MODEL="mosaic_surv_single"
             fi
             POE_VARIANT="C"
             BAG_LOSS="cox_surv"
@@ -410,8 +410,8 @@ apply_preset() {
                 --batch_size_stage1 "$BATCH_SIZE_STAGE1"
             )
             ;;
-        survtri_poe_vae_C_multi)
-            MODEL="survtri_poe_vae_c_multi"
+        mosaic_surv_multi)
+            MODEL="mosaic_surv_multi"
             POE_VARIANT="C"
             BAG_LOSS="cox_surv"
             RESULTS_SUBDIR="$MODEL"
@@ -432,21 +432,21 @@ apply_preset() {
                 --batch_size_stage1 "$BATCH_SIZE_STAGE1"
             )
             ;;
-        survtri_poe_vae_C_film|survtri_poe_vae_C_film_noenum|survtri_poe_vae_C_film_kl|survtri_poe_vae_C_film_beta0|survtri_poe_vae_C_film_surv0)
-            if [ "$PRESET" = "survtri_poe_vae_C_film_kl" ]; then
-                MODEL="survtri_poe_vae_c_film_kl"
-            elif [ "$PRESET" = "survtri_poe_vae_C_film_surv0" ]; then
-                MODEL="survtri_poe_vae_c_film_surv0"
-            elif [ "$PRESET" = "survtri_poe_vae_C_film_beta0" ]; then
+        mosaic_surv|mosaic_surv_noenum|mosaic_surv_kl|mosaic_surv_nojeffreys|mosaic_surv_detached)
+            if [ "$PRESET" = "mosaic_surv_kl" ]; then
+                MODEL="mosaic_surv_kl"
+            elif [ "$PRESET" = "mosaic_surv_detached" ]; then
+                MODEL="mosaic_surv_detached"
+            elif [ "$PRESET" = "mosaic_surv_nojeffreys" ]; then
                 # 独立 modality 名：python 按 modality 建结果目录，
-                # 若复用 c_film 会覆盖主模型结果
-                MODEL="survtri_poe_vae_c_film_beta0"
+                # 若复用 mosaic_surv（主模型）会覆盖主模型结果
+                MODEL="mosaic_surv_nojeffreys"
             else
-                MODEL="survtri_poe_vae_c_film"
+                MODEL="mosaic_surv"
             fi
-            if [ "$PRESET" = "survtri_poe_vae_C_film_noenum" ]; then
-                MODEL="survtri_poe_vae_c_film_noenum"
-            elif [ "$PRESET" = "survtri_poe_vae_C_film_beta0" ]; then
+            if [ "$PRESET" = "mosaic_surv_noenum" ]; then
+                MODEL="mosaic_surv_noenum"
+            elif [ "$PRESET" = "mosaic_surv_nojeffreys" ]; then
                 POE_BETA_TARGET=0
             fi
             RESULTS_SUBDIR="$MODEL"

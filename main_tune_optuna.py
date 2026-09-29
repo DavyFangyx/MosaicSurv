@@ -61,10 +61,10 @@ def _build_dataset_factory(args):
             "survtri_poe_vae_b_nopretrain",
             "survtri_poe_vae_b_single",
             "survtri_poe_vae_b_multi",
-            "survtri_poe_vae_b_film",
-            "survtri_poe_vae_c_single",
-            "survtri_poe_vae_c_multi",
-            "survtri_poe_vae_c_film",
+            "mosaic_surv_twostage",
+            "mosaic_surv_single",
+            "mosaic_surv_multi",
+            "mosaic_surv",
             "mvae_poe",
             "mopoe",
             "flex_moe",
@@ -128,10 +128,10 @@ def _objective_factory(base_args):
     base_run_name = base_args.run_name
 
     def objective(trial):
-        if base_args.modality not in {"survtri_poe_vae", "survtri_poe_vae_c_film"}:
+        if base_args.modality not in {"survtri_poe_vae", "mosaic_surv"}:
             raise ValueError(
                 "The minimal Optuna tuner currently supports only survtri_poe_vae "
-                "and survtri_poe_vae_c_film."
+                "and mosaic_surv."
             )
 
         sampled_params = sample_survtri_poe_vae_trial(trial, base_args)
@@ -240,12 +240,12 @@ def main(args):
     ensure_optuna_available()
     import optuna
 
-    if args.modality not in {"survtri_poe_vae", "survtri_poe_vae_c_film"}:
+    if args.modality not in {"survtri_poe_vae", "mosaic_surv"}:
         raise ValueError(
             "main_tune_optuna.py currently supports only "
-            "`--modality survtri_poe_vae` or `--modality survtri_poe_vae_c_film`."
+            "`--modality survtri_poe_vae` or `--modality mosaic_surv`."
         )
-    if args.modality == "survtri_poe_vae_c_film":
+    if args.modality == "mosaic_surv":
         args.poe_variant = "C"
     if args.poe_variant not in {"A", "B", "C"}:
         raise ValueError("main_tune_optuna.py currently supports only `--poe_variant A|B|C`.")

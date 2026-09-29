@@ -1,5 +1,7 @@
 # 三模态 PoE-VAE 生存预测模型 — 设计说明
 
+> 正式命名：MosaicSurv（原 Cfilm / survtri_poe_vae_C_film）
+
 本文档整合此前讨论中确定的所有设计决策，作为后续撰写 Codex 执行 prompt 的直接依据。凡本文档未覆盖的实现细节，均属于遗留待定项，需在写执行 prompt 前单独确认。
 
 ---

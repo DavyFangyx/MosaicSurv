@@ -6,8 +6,9 @@ Pure computation module, no output files: the paper-table script
 and folds the results directly into Table1a/1b and Appendix S1-S3.
 
 Covers the nll_surv baselines whose hazard logits are saved in
-split_N_results.pkl; cox models (clinic_cox, C_film) are skipped here - their
-IBS/AUC come from the forward-only Breslow pass (Table1_CoxBreslow_Forward.py).
+split_N_results.pkl; cox models (clinic_cox, mosaic_surv, 原 Cfilm) are skipped
+here - their IBS/AUC come from the forward-only Breslow pass
+(Table1_CoxBreslow_Forward.py).
 
 Self-check: the c-index recomputed from the saved per-patient risk must match
 test_result.csv's test_cindex fold by fold (abs diff < 1e-6), otherwise the

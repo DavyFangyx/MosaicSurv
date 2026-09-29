@@ -2,7 +2,7 @@
 # configs/z_exp_gen/Table4_Abaltion_Test/_common.bash
 # 共享的 Table4_Abaltion_Test 配置生成逻辑。
 # 全部消融 preset 的公共超参（lr/reg/batch/poe_*）统一来自
-# configs/z_exp_gen/cfilm_hparams.sh，与主模型 Cfilm 保持一致。
+# configs/z_exp_gen/mosaic_hparams.sh，与主模型 MosaicSurv 保持一致。
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     cat <<'EOF'
@@ -21,9 +21,9 @@ EOF
     exit 2
 fi
 
-# Cfilm 公共超参（Test1-4 共用单一来源；全部消融 preset 使用）
+# MosaicSurv 公共超参（Test1-4 共用单一来源；全部消融 preset 使用）
 # shellcheck disable=SC1090
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../cfilm_hparams.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../mosaic_hparams.sh"
 
 normalize_stage1_pool_tag() {
     local raw_value="$1"
@@ -62,7 +62,7 @@ generate_table4_ablation_test_configs() {
     clinic_experiment="${CLINIC_EXPERIMENT:-L0}"
     gene_experiment="${GENE_EXPERIMENT:-scFoundation_embedding_cell_norm}"
     wsi_experiment="${WSI_EXPERIMENT:-uni_v1}"
-    batch_size="${CFILM_BATCH_SIZE}"
+    batch_size="${MOSAIC_BATCH_SIZE}"
     max_epochs="${MAX_EPOCHS:-20}"
     warmup_epochs="${WARMUP_EPOCHS:-3}"
     stage1_pool="${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}"
@@ -90,24 +90,24 @@ generate_table4_ablation_test_configs() {
         read -r -a ablation_presets <<< "$PRESETS"
     else
         ablation_presets=(
-            survtri_poe_vae_C_single
-            survtri_poe_vae_C_single_enum
-            survtri_poe_vae_C_film_noenum
-            survtri_poe_vae_C_film
-            survtri_poe_vae_C_multi
-            survtri_poe_vae_B_film
-            survtri_poe_vae_A_film
-            survtri_poe_vae_C_film_kl
-            survtri_poe_vae_C_film_beta0
-            survtri_poe_vae_C_film_surv0
+            mosaic_surv_single
+            mosaic_surv_single_enum
+            mosaic_surv_noenum
+            mosaic_surv
+            mosaic_surv_multi
+            mosaic_surv_twostage
+            mosaic_surv_frozen
+            mosaic_surv_kl
+            mosaic_surv_nojeffreys
+            mosaic_surv_detached
         )
     fi
 
-    # Cfilm 公共超参（全部消融 preset 与主模型 Cfilm 保持一致；
-    # beta0/surv0 等消融维度由 preset 内部的覆盖逻辑处理）
-    local poe_beta_target="${CFILM_POE_BETA_TARGET}"
-    local poe_surv_lambda="${CFILM_POE_SURV_LAMBDA}"
-    # stage1 预训练 batch 保持历史默认 128，不随 Cfilm 的 stage2 batch 变化
+    # MosaicSurv 公共超参（全部消融 preset 与主模型 MosaicSurv 保持一致；
+    # nojeffreys/detached 等消融维度由 preset 内部的覆盖逻辑处理）
+    local poe_beta_target="${MOSAIC_POE_BETA_TARGET}"
+    local poe_surv_lambda="${MOSAIC_POE_SURV_LAMBDA}"
+    # stage1 预训练 batch 保持历史默认 128，不随 MosaicSurv 的 stage2 batch 变化
     local batch_size_stage1="${BATCH_SIZE_STAGE1:-128}"
     local max_epochs_stage1="${MAX_EPOCHS_STAGE1:-10}"
 
@@ -138,7 +138,7 @@ generate_table4_ablation_test_configs() {
         local preset_beta="$poe_beta_target"
         local preset_lambda="$poe_surv_lambda"
         case "$preset" in
-            survtri_poe_vae_C_film_beta0) preset_beta=0 ;;
+            mosaic_surv_nojeffreys) preset_beta=0 ;;
         esac
         seq=$((seq + 1))
         fname=$(printf "%s__%03d__%s.conf" "$file_prefix" "$seq" "$preset")
@@ -159,13 +159,13 @@ MAX_EPOCHS_STAGE1=$max_epochs_stage1
 WARMUP_EPOCHS=$warmup_epochs
 POE_BETA_TARGET=$preset_beta
 POE_SURV_LAMBDA=$preset_lambda
-LR=$CFILM_LR
-REG=$CFILM_REG
-POE_MODALITY_DROPOUT=$CFILM_POE_MODALITY_DROPOUT
-POE_MMHID=$CFILM_POE_MMHID
-ALPHAFIX=$CFILM_ALPHAFIX
-ALPHAPGC=$CFILM_ALPHAPGC
-BETAFIX=$CFILM_BETAFIX
+LR=$MOSAIC_LR
+REG=$MOSAIC_REG
+POE_MODALITY_DROPOUT=$MOSAIC_POE_MODALITY_DROPOUT
+POE_MMHID=$MOSAIC_POE_MMHID
+ALPHAFIX=$MOSAIC_ALPHAFIX
+ALPHAPGC=$MOSAIC_ALPHAPGC
+BETAFIX=$MOSAIC_BETAFIX
 POE_STAGE1_STUDIES=${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}
 EOF
 )"

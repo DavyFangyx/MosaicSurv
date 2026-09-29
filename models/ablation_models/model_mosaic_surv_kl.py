@@ -1,10 +1,10 @@
-"""Model C + FiLM head, joint training."""
+"""MosaicSurv w/ KL: Model-C PoE-VAE + FiLM head using standard KL regularization."""
 
-from models.model_SurvTriPoEVAE import SurvTriPoEVAE
+from models.model_SurvTriPoEVAE import SurvTriPoEVAE_KL
 from models.model_utils import FiLMHead
 
 
-class SurvTriPoEVAE_CFiLM(SurvTriPoEVAE):
+class MosaicSurvKL(SurvTriPoEVAE_KL):
     def __init__(self, *args, **kwargs):
         kwargs["poe_variant"] = "C"
         super().__init__(*args, **kwargs)

@@ -52,10 +52,10 @@ generate_poe_single_modal_bc_configs() {
         survtri_poe_vae_C
         survtri_poe_vae_B_single
         survtri_poe_vae_B_multi
-        survtri_poe_vae_B_film
-        survtri_poe_vae_C_single
-        survtri_poe_vae_C_multi
-        survtri_poe_vae_C_film
+        mosaic_surv_twostage
+        mosaic_surv_single
+        mosaic_surv_multi
+        mosaic_surv
     )
     local -a single_modalities=(
         wsi

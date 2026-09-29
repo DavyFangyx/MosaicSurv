@@ -29,6 +29,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from model_names import display_name
+
 
 GROUP_DIR = "Table2_Baselines"
 DISPLAY_DIR = "Table2_Modality_Missing_Tset"
@@ -128,6 +130,10 @@ def append_rank_suffix(value: str, rank: int) -> str:
 
 
 def model_label(dir_name: str) -> str:
+    # mosaic_surv 家族（mosaic_surv / mosaic_surv_single / ...）用集中映射的正式名；
+    # 其余目录名（modality_concat__resampler__zero、hgcn、遗留 preset）保持旧规则。
+    if dir_name.lower().startswith("mosaic_surv"):
+        return display_name(dir_name)
     return dir_name.replace("__resampler__", "_").replace("__", "_")
 
 

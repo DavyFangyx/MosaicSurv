@@ -62,19 +62,19 @@ CUDA_VISIBLE_DEVICES=7 bash bg_tune.sh gpu7_optunaC.log \
     --wandb_project POE_MODELC_TUNE
 ''' 
 
-# MODELC_FILM示例:
-# 搜索空间见 utils/optuna_utils.py::sample_survtri_poe_vae_model_c_film：
+# MosaicSurv 示例:
+# 搜索空间见 utils/optuna_utils.py::sample_mosaic_surv_trial：
 # alpha 默认使用模型中的可学习 modality logits；只有固定 alpha 时才传 --alphafix；
 # 其余 lr / reg / poe_surv_lambda / poe_beta_target / poe_modality_dropout /
 # poe_mmhid ∈ {128, 256, 384}、batch_size ∈ {16, 32, 64, 128} 也都是离散采样。
-# poe_variant 会被强制成 C。C-film 的 val_cindex / 选模 / 剪枝都用完整 PGC
+# poe_variant 会被强制成 C。MosaicSurv 的 val_cindex / 选模 / 剪枝都用完整 PGC
 # 主头 C-index，不再用 7-pattern 平均。完整训练日志仍写第一个参数；
 # 超参/分数分析日志默认写 results/optuna/<study_name>.log。
 # 停止: kill 3407781
 ''' 
-CUDA_VISIBLE_DEVICES=7 bash bg_tune.sh gpu7_optunaCfilm.log \
+CUDA_VISIBLE_DEVICES=7 bash bg_tune.sh gpu7_optuna_mosaic_surv.log \
     --optuna_studies kirp,lihc,coad,kirc,brca \
-    --modality survtri_poe_vae_c_film \
+    --modality mosaic_surv \
     --optuna_fold_mode mean_cv \
     --optuna_pruner median \
     --optuna_n_startup_trials 5 \

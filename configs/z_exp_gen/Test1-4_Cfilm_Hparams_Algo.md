@@ -1,34 +1,34 @@
-# Test1-4 各模型超参数：算法视角说明（Cfilm 主模型）
+# Test1-4 各模型超参数：算法视角说明（MosaicSurv 主模型）
 
-主模型为 `survtri_poe_vae_C_film`（Cfilm）。本文档说明 Test1-4 四个实验中
-各模型超参数的使用规则：哪些模型随 Cfilm 公共超参一起变化、哪些保持独立、
+主模型为 `mosaic_surv`（MosaicSurv）。本文档说明 Test1-4 四个实验中
+各模型超参数的使用规则：哪些模型随 MosaicSurv 公共超参一起变化、哪些保持独立、
 哪些绑定关系是代码里已有的。
 
 ## 模型分类总览
 
 | 类别 | 模型（preset） | 出现位置 | 超参使用 |
 |---|---|---|---|
-| **主模型** | `survtri_poe_vae_C_film`（Cfilm） | Test1 / Test2 / Test3 / Test4（消融参照行） | `cfilm_hparams.sh` 全套 9 键 |
-| **基线**（Test1） | `abmil_wsi`、`mlp_wsi`、`transmil_wsi`、`mlp/snn_clinic_mean/flatten`、`clinic_cox`、`mlp_gene`、`snn_gene`、`survpc_f`、`porpoise`、`survpath`、`mcat`、`survgc_f`、`survpgc_f` | 仅 Test1 | defaults + 脚本默认，与 Cfilm 无关 |
+| **主模型** | `mosaic_surv`（MosaicSurv） | Test1 / Test2 / Test3 / Test4（消融参照行） | `mosaic_hparams.sh` 全套 9 键 |
+| **基线**（Test1） | `abmil_wsi`、`mlp_wsi`、`transmil_wsi`、`mlp/snn_clinic_mean/flatten`、`clinic_cox`、`mlp_gene`、`snn_gene`、`survpc_f`、`porpoise`、`survpath`、`mcat`、`survgc_f`、`survpgc_f` | 仅 Test1 | defaults + 脚本默认，与 MosaicSurv 无关 |
 | **基线**（Test2） | `modality_concat_zero`、`modality_concat_mean`、`mvae_poe`、`mopoe`、`hgcn` | 仅 Test2 | 同上（hgcn 的 batch 由 presets.sh 硬绑 32） |
 | **基线**（Test3） | `hgcn` | 仅 Test3 | 同上 |
-| **消融**（仅 Table4） | `survtri_poe_vae_C_single`、`C_single_enum`、`C_film_noenum`、`C_multi`、`B_film`、`A_film`、`C_film_kl`、`C_film_beta0`、`C_film_surv0` | 仅 Test4 | `cfilm_hparams.sh` 全套 9 键（消融维度例外见 Test4 节） |
+| **消融**（仅 Table4） | `mosaic_surv_single`、`mosaic_surv_single_enum`、`mosaic_surv_noenum`、`mosaic_surv_multi`、`mosaic_surv_twostage`、`mosaic_surv_frozen`、`mosaic_surv_kl`、`mosaic_surv_nojeffreys`、`mosaic_surv_detached` | 仅 Test4 | `mosaic_hparams.sh` 全套 9 键（消融维度例外见 Test4 节） |
 
 POE 家族其余成员（`survtri_poe_vae_A`、`B`、`C`、`B_single`、`B_multi` 等）
 在主表 Test1-3 中全部注释不用，不作为基线出现在任何主表中。
 
 ## 0. 参数归属一句话结论
 
-- **Cfilm 公共超参 9 键**：`LR`、`REG`、`POE_SURV_LAMBDA`、`POE_BETA_TARGET`、
+- **MosaicSurv 公共超参 9 键**：`LR`、`REG`、`POE_SURV_LAMBDA`、`POE_BETA_TARGET`、
   `POE_MODALITY_DROPOUT`、`POE_MMHID`、`BATCH_SIZE`、`ALPHAFIX`、`ALPHAPGC`。
-- **与 Cfilm 相同**：Test1/2/3 的主模型 Cfilm 本身；Test4 全部 10 个消融 preset
+- **与 MosaicSurv 相同**：Test1/2/3 的主模型 MosaicSurv 本身；Test4 全部 10 个消融 preset
   （公平消融：除消融维度外超参必须一致）。
 - **独立**：Test1-3 的基线模型；9 键之外的公共参数（stage1 三键、`BETAFIX`、
   架构参数、训练计划）。
 - POE 家族其余成员（A/B/C 系变体）已全部退出主表，其中消融相关的降级到 Test4，
   共享 9 键。
 
-## 1. Cfilm 算法结构与数学形式
+## 1. MosaicSurv 算法结构与数学形式
 
 ### 1.1 前向链路
 
@@ -94,7 +94,7 @@ J = 0.5·(σ² + σ⁻² − 2 + μ²(1+σ⁻²))，对批次求均值
 ```
 
 Jeffreys 是 KL(q‖p)+KL(p‖q) 的对称化：正向 KL 防后验塌缩、反向 KL 促模态对齐，
-比单向 KL 更温和。`c_film_kl` 消融验证这个选择（换成标准 KL，
+比单向 KL 更温和。`mosaic_surv_kl` 消融验证这个选择（换成标准 KL，
 `models/model_SurvTriPoEVAE.py:446`）。
 
 **③ 生存损失 L_surv（Cox + 7-pattern 枚举，`models/model_utils.py:620`）**
@@ -120,9 +120,9 @@ z = (1+γ) ⊙ μ_joint + β            # FiLM 调制
 risk = classifier( fuse_fc(z) )    # 共享 MLP（隐层宽 = POE_MMHID）
 ```
 
-初始化 γ=0、β=0 → 起步等价于无调制。与 `C_multi`（每个 pattern 一个独立 MLP，
+初始化 γ=0、β=0 → 起步等价于无调制。与 `mosaic_surv_multi`（每个 pattern 一个独立 MLP，
 `model_utils.py:578`）相比，FiLM 用一个共享 MLP + 32 维 pattern 条件，参数少、
-pattern 间共享表示；`C_single_enum`（共享单头 + 枚举，`pattern_id` 被忽略）则
+pattern 间共享表示；`mosaic_surv_single_enum`（共享单头 + 枚举，`pattern_id` 被忽略）则
 完全不区分 pattern。三个是 A 组消融的对比轴。
 
 ### 1.5 模态 dropout 与"缺失仍重建"
@@ -157,12 +157,12 @@ epoch ≥ 2 → 0.1。**先纯学重建、再逐步压先验对齐**，避免训
 |---|---|---|---|
 | A 线性探针 | VAE 预训练（`L_rec+βJ`，`LR_STAGE1`/`MAX_EPOCHS_STAGE1`/`BATCH_SIZE_STAGE1`） | 冻结主干，只训 linear probe + FiLM 头 | 只有 L_surv |
 | B 两阶段 | 同上 | 冻结主干只训头（B_single/multi/film）；plain B 是分组 lr 微调（编码器 = `LR`×`POE_ENCODER_LR_RATIO`） | 只有 L_surv |
-| C 联合（Cfilm） | 无 | 单阶段，全部参数一个 lr = `LR` | `L_rec+βJ+λL_surv` |
+| C 联合（MosaicSurv） | 无 | 单阶段，全部参数一个 lr = `LR` | `L_rec+βJ+λL_surv` |
 
 C 系 stage2 直接进入联合训练（`models/model_SurvTriPoEVAE.py:65` 把 C 的
 `training_stage` 初始为 stage2）；A/B 系先走 stage1（`utils/core_utils.py:2738`）。
 
-## 2. Cfilm 公共超参 9 键：逐项算法含义
+## 2. MosaicSurv 公共超参 9 键：逐项算法含义
 
 | # | 键 | 值 | 算法作用 | 变化方向的影响（由数学形式推出） |
 |---|---|---|---|---|
@@ -180,12 +180,12 @@ C 系 stage2 直接进入联合训练（`models/model_SurvTriPoEVAE.py:65` 把 C
 α 见 `model_utils.py:398`；dropout 见 `missing_mask_protocol.py:360`；
 mmhid 见 `model_utils.py:578,599`。
 
-## 3. 独立超参（不随 Cfilm 变化的键）
+## 3. 独立超参（不随 MosaicSurv 变化的键）
 
 测
 | `OPT` / `LR_SCHEDULER` / `REG_TYPE` | radam / cosine / L2 | `defaults.conf` | 优化器与调度器 |
-| `BATCH_SIZE_STAGE1` | 128 | Table 脚本 | stage1 VAE 预训练 batch（只 A_film/B_film 用）；保持历史配置，不随 stage2 `BATCH_SIZE=16` 联动 |
-| `LR_STAGE1` | 1e-4 | `defaults.conf` | stage1 AdamW 学习率（只 A_film/B_film 用） |
+| `BATCH_SIZE_STAGE1` | 128 | Table 脚本 | stage1 VAE 预训练 batch（只 mosaic_surv_frozen/mosaic_surv_twostage 用）；保持历史配置，不随 stage2 `BATCH_SIZE=16` 联动 |
+| `LR_STAGE1` | 1e-4 | `defaults.conf` | stage1 AdamW 学习率（只 mosaic_surv_frozen/mosaic_surv_twostage 用） |
 | `MAX_EPOCHS_STAGE1` | 10 | Table 脚本 | stage1 预训练 epoch |
 | `MAX_EPOCHS` / `WARMUP_EPOCHS` | 20 / 3 | Table 脚本 | 总 epoch / β warmup 长度（β 具体值由 9 键决定，长度独立） |
 | `POE_DECODER_HIDDEN_DIM` | 512 | `defaults.conf` | 三模态解码器隐层宽（架构参数，不属于调参集） |
@@ -196,12 +196,12 @@ mmhid 见 `model_utils.py:578,599`。
 
 ## 4. 各实验的参数归属
 
-| 实验 | 与 Cfilm 相同的键 | 例外（算法原因） | 独立（不随 Cfilm 变化） |
+| 实验 | 与 MosaicSurv 相同的键 | 例外（算法原因） | 独立（不随 MosaicSurv 变化） |
 |---|---|---|---|
-| Test1（Table1 主表） | 主模型 Cfilm：全套 9 键 | 无 | 基线（14 个，与 POE 家族无关）用 defaults + 脚本默认，batch=1 |
-| Test2（Table2 缺失模态） | Cfilm：全套 9 键 | 无 | 5 个基线（modality_concat×2、mvae_poe、mopoe、hgcn）；hgcn batch=32 硬绑 |
-| Test3（Table3 缺失配比） | Cfilm：8 键 | `POE_MODALITY_DROPOUT=0`：unified_mask_csv 下缺失由共享 mask csv 决定，随机 drop 被强制归零（`missing_mask_protocol.py:338`），写 0 是显式化 | hgcn（batch=32 硬绑） |
-| Test4（Table4 消融） | 全部 10 个 preset：全套 9 键 | `C_film_beta0` 的 `POE_BETA_TARGET=0`——改超参即消融本身（去掉 J 项） | stage1 三键（`LR_STAGE1`/`MAX_EPOCHS_STAGE1`/`BATCH_SIZE_STAGE1`）只作用于 A_film/B_film；其余独立键同 §3 |
+| Test1（Table1 主表） | 主模型 MosaicSurv：全套 9 键 | 无 | 基线（14 个，与 POE 家族无关）用 defaults + 脚本默认，batch=1 |
+| Test2（Table2 缺失模态） | MosaicSurv：全套 9 键 | 无 | 5 个基线（modality_concat×2、mvae_poe、mopoe、hgcn）；hgcn batch=32 硬绑 |
+| Test3（Table3 缺失配比） | MosaicSurv：8 键 | `POE_MODALITY_DROPOUT=0`：unified_mask_csv 下缺失由共享 mask csv 决定，随机 drop 被强制归零（`missing_mask_protocol.py:338`），写 0 是显式化 | hgcn（batch=32 硬绑） |
+| Test4（Table4 消融） | 全部 10 个 preset：全套 9 键 | `mosaic_surv_nojeffreys` 的 `POE_BETA_TARGET=0`——改超参即消融本身（去掉 J 项） | stage1 三键（`LR_STAGE1`/`MAX_EPOCHS_STAGE1`/`BATCH_SIZE_STAGE1`）只作用于 mosaic_surv_frozen/mosaic_surv_twostage；其余独立键同 §3 |
 
 （各实验启用哪些模型、哪些注释，见执行版文档的模型分类总览。）
 
@@ -211,29 +211,29 @@ mmhid 见 `model_utils.py:578,599`。
 
 **A 组 — 生存读出层**（都走 C 联合训练）：
 
-| preset | 读出层 | 与 Cfilm 的算法差异 |
+| preset | 读出层 | 与 MosaicSurv 的算法差异 |
 |---|---|---|
-| `C_single` | 单头 | 共享 fuse_fc，按当前可用 mask 一次前向，无 pattern 枚举 |
-| `C_single_enum` | 单头 + 枚举 | 共享单头但 7-pattern 枚举训练（pattern_id 被忽略） |
-| `C_film_noenum` | FiLM 头 | 有 FiLM 条件化，但去掉 7-pattern 枚举（只用当前 pattern 一次） |
-| `C_film`（主模型） | FiLM 头 + 枚举 | 参照 |
-| `C_multi` | 7 专属头 | FiLM 调制换成每个 pattern 一个独立 MLP（`MultiPatternHead`） |
+| `mosaic_surv_single` | 单头 | 共享 fuse_fc，按当前可用 mask 一次前向，无 pattern 枚举 |
+| `mosaic_surv_single_enum` | 单头 + 枚举 | 共享单头但 7-pattern 枚举训练（pattern_id 被忽略） |
+| `mosaic_surv_noenum` | FiLM 头 | 有 FiLM 条件化，但去掉 7-pattern 枚举（只用当前 pattern 一次） |
+| `mosaic_surv`（主模型） | FiLM 头 + 枚举 | 参照 |
+| `mosaic_surv_multi` | 7 专属头 | FiLM 调制换成每个 pattern 一个独立 MLP（`MultiPatternHead`） |
 
 **B 组 — 训练范式**（读出层都是 FiLM 头）：
 
 | preset | 范式差异（见 1.7） |
 |---|---|
-| `A_film` | 线性探针：冻结主干，只训 FiLM 头 + linear probe |
-| `B_film` | 两阶段：stage1 预训练，stage2 冻结主干只训 FiLM 头（`core_utils.py:2814`） |
-| `C_film` | 联合训练（对照） |
+| `mosaic_surv_frozen` | 线性探针：冻结主干，只训 FiLM 头 + linear probe |
+| `mosaic_surv_twostage` | 两阶段：stage1 预训练，stage2 冻结主干只训 FiLM 头（`core_utils.py:2814`） |
+| `mosaic_surv` | 联合训练（对照） |
 
 **C 组 — 损失项**（架构不变，只动损失）：
 
 | preset | 损失差异 |
 |---|---|
-| `C_film_kl` | Jeffreys（对称 KL）→ 标准 KL（`SurvTriPoEVAE_KL`，`model_SurvTriPoEVAE.py:446`） |
-| `C_film_beta0` | β≡0 去掉 J 项：L = L_rec + λ·L_surv |
-| `C_film_surv0` | L_surv 不回传主干：编码器/PoE α 只收 L_rec+βJ 梯度，FiLM 头仍收 λ·L_surv 梯度（`surv_detach_poe`：PoE 计算包在 `torch.no_grad()` 里） |
+| `mosaic_surv_kl` | Jeffreys（对称 KL）→ 标准 KL（`SurvTriPoEVAE_KL`，`model_SurvTriPoEVAE.py:446`） |
+| `mosaic_surv_nojeffreys` | β≡0 去掉 J 项：L = L_rec + λ·L_surv |
+| `mosaic_surv_detached` | L_surv 不回传主干：编码器/PoE α 只收 L_rec+βJ 梯度，FiLM 头仍收 λ·L_surv 梯度（`surv_detach_poe`：PoE 计算包在 `torch.no_grad()` 里） |
 
 ## 6. 超参 → 代码位置速查
 

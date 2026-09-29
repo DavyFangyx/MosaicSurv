@@ -42,10 +42,10 @@ from models.ablation_models.model_A_film import SurvTriPoEVAE_AFiLM
 from models.ablation_models.model_C_single import SurvTriPoEVAE_CSingle
 from models.ablation_models.model_C_single_enum import SurvTriPoEVAE_CSingleEnum
 from models.ablation_models.model_C_multi import SurvTriPoEVAE_CMulti
-from models.ablation_models.model_C_film import SurvTriPoEVAE_CFiLM
-from models.ablation_models.model_C_film_noenum import SurvTriPoEVAE_CFiLMNoEnum
-from models.ablation_models.model_C_film_kl import SurvTriPoEVAE_CFiLMKL
-from models.ablation_models.model_C_film_surv0 import SurvTriPoEVAE_CFiLMNoSurvGrad
+from models.ablation_models.model_mosaic_surv import MosaicSurv
+from models.ablation_models.model_mosaic_surv_noenum import MosaicSurvNoEnum
+from models.ablation_models.model_mosaic_surv_kl import MosaicSurvKL
+from models.ablation_models.model_mosaic_surv_detached import MosaicSurvDetached
 from models.missing_modality_baselines.concat import ConcatMissingModalityBaseline
 from models.missing_modality_baselines.vae_family import MVAEBaseline, MoPoEBaseline
 from models.missing_modality_baselines.common import (
@@ -104,38 +104,38 @@ TRIMODAL_MODALITIES = {
     "survtri_mlp_concat",
     "survtri_mlp_mhsa",
 }
-POE_NEW_A_MODALITIES = {"survtri_poe_vae_a_film"}
+POE_NEW_A_MODALITIES = {"mosaic_surv_frozen"}
 POE_NEW_B_MODALITIES = {
     "survtri_poe_vae_b_single",
     "survtri_poe_vae_b_multi",
-    "survtri_poe_vae_b_film",
+    "mosaic_surv_twostage",
 }
 POE_NEW_C_MODALITIES = {
-    "survtri_poe_vae_c_single",
-    "survtri_poe_vae_c_single_enum",
-    "survtri_poe_vae_c_multi",
-    "survtri_poe_vae_c_film",
-    "survtri_poe_vae_c_film_noenum",
-    "survtri_poe_vae_c_film_kl",
-    "survtri_poe_vae_c_film_surv0",
-    "survtri_poe_vae_c_film_beta0",
+    "mosaic_surv_single",
+    "mosaic_surv_single_enum",
+    "mosaic_surv_multi",
+    "mosaic_surv",
+    "mosaic_surv_noenum",
+    "mosaic_surv_kl",
+    "mosaic_surv_detached",
+    "mosaic_surv_nojeffreys",
 }
 POE_MULTI_PATTERN_MODALITIES = {
     "survtri_poe_vae_b_multi",
-    "survtri_poe_vae_b_film",
-    "survtri_poe_vae_a_film",
-    "survtri_poe_vae_c_multi",
-    "survtri_poe_vae_c_film",
-    "survtri_poe_vae_c_single_enum",
-    "survtri_poe_vae_c_film_kl",
-    "survtri_poe_vae_c_film_surv0",
-    "survtri_poe_vae_c_film_beta0",
+    "mosaic_surv_twostage",
+    "mosaic_surv_frozen",
+    "mosaic_surv_multi",
+    "mosaic_surv",
+    "mosaic_surv_single_enum",
+    "mosaic_surv_kl",
+    "mosaic_surv_detached",
+    "mosaic_surv_nojeffreys",
 }
 POE_PGC_SELECTION_MODALITIES = {
-    "survtri_poe_vae_c_film",
-    "survtri_poe_vae_c_film_kl",
-    "survtri_poe_vae_c_film_surv0",
-    "survtri_poe_vae_c_film_beta0",
+    "mosaic_surv",
+    "mosaic_surv_kl",
+    "mosaic_surv_detached",
+    "mosaic_surv_nojeffreys",
 }
 POE_MODALITIES = {
     "survtri_poe_vae",
@@ -494,16 +494,16 @@ def _build_survival_dataset_factory(args):
             "survtri_poe_vae_b_nopretrain",
             "survtri_poe_vae_b_single",
             "survtri_poe_vae_b_multi",
-            "survtri_poe_vae_b_film",
-            "survtri_poe_vae_a_film",
-            "survtri_poe_vae_c_single",
-            "survtri_poe_vae_c_single_enum",
-            "survtri_poe_vae_c_multi",
-            "survtri_poe_vae_c_film",
-            "survtri_poe_vae_c_film_kl",
-            "survtri_poe_vae_c_film_noenum",
-            "survtri_poe_vae_c_film_surv0",
-            "survtri_poe_vae_c_film_beta0",
+            "mosaic_surv_twostage",
+            "mosaic_surv_frozen",
+            "mosaic_surv_single",
+            "mosaic_surv_single_enum",
+            "mosaic_surv_multi",
+            "mosaic_surv",
+            "mosaic_surv_kl",
+            "mosaic_surv_noenum",
+            "mosaic_surv_detached",
+            "mosaic_surv_nojeffreys",
         ) else False,
         is_survpc=True if args.modality == "survpc" else False,
         is_survpc_f=True if args.modality == "survpc_f" else False,
@@ -1191,16 +1191,16 @@ def _init_model(args, current_fold=None):
     elif args.modality in {
         "survtri_poe_vae_b_single",
         "survtri_poe_vae_b_multi",
-        "survtri_poe_vae_b_film",
-        "survtri_poe_vae_a_film",
-        "survtri_poe_vae_c_single",
-        "survtri_poe_vae_c_single_enum",
-        "survtri_poe_vae_c_multi",
-        "survtri_poe_vae_c_film",
-        "survtri_poe_vae_c_film_kl",
-        "survtri_poe_vae_c_film_noenum",
-        "survtri_poe_vae_c_film_surv0",
-        "survtri_poe_vae_c_film_beta0",
+        "mosaic_surv_twostage",
+        "mosaic_surv_frozen",
+        "mosaic_surv_single",
+        "mosaic_surv_single_enum",
+        "mosaic_surv_multi",
+        "mosaic_surv",
+        "mosaic_surv_kl",
+        "mosaic_surv_noenum",
+        "mosaic_surv_detached",
+        "mosaic_surv_nojeffreys",
     }:
         if args.modality in POE_NEW_A_MODALITIES:
             args.poe_variant = "A"
@@ -1228,16 +1228,16 @@ def _init_model(args, current_fold=None):
         model_cls = {
             "survtri_poe_vae_b_single": SurvTriPoEVAE_BSingle,
             "survtri_poe_vae_b_multi": SurvTriPoEVAE_BMulti,
-            "survtri_poe_vae_b_film": SurvTriPoEVAE_BFiLM,
-            "survtri_poe_vae_a_film": SurvTriPoEVAE_AFiLM,
-            "survtri_poe_vae_c_single": SurvTriPoEVAE_CSingle,
-        "survtri_poe_vae_c_single_enum": SurvTriPoEVAE_CSingleEnum,
-        "survtri_poe_vae_c_multi": SurvTriPoEVAE_CMulti,
-        "survtri_poe_vae_c_film": SurvTriPoEVAE_CFiLM,
-        "survtri_poe_vae_c_film_kl": SurvTriPoEVAE_CFiLMKL,
-        "survtri_poe_vae_c_film_noenum": SurvTriPoEVAE_CFiLMNoEnum,
-        "survtri_poe_vae_c_film_surv0": SurvTriPoEVAE_CFiLMNoSurvGrad,
-        "survtri_poe_vae_c_film_beta0": SurvTriPoEVAE_CFiLM,
+            "mosaic_surv_twostage": SurvTriPoEVAE_BFiLM,
+            "mosaic_surv_frozen": SurvTriPoEVAE_AFiLM,
+            "mosaic_surv_single": SurvTriPoEVAE_CSingle,
+            "mosaic_surv_single_enum": SurvTriPoEVAE_CSingleEnum,
+            "mosaic_surv_multi": SurvTriPoEVAE_CMulti,
+            "mosaic_surv": MosaicSurv,
+            "mosaic_surv_kl": MosaicSurvKL,
+            "mosaic_surv_noenum": MosaicSurvNoEnum,
+            "mosaic_surv_detached": MosaicSurvDetached,
+            "mosaic_surv_nojeffreys": MosaicSurv,
         }[args.modality]
         model = model_cls(**model_dict)
 

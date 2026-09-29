@@ -1,5 +1,6 @@
 """
-Offline forward-only Breslow IBS/AUC for cox_surv models (clinic_cox, C_film).
+Offline forward-only Breslow IBS/AUC for cox_surv models (clinic_cox,
+mosaic_surv, 原名 Cfilm)。
 
 No training, no gradients: loads the saved checkpoint and runs ONE eval
 forward pass over the TRAIN split to collect train risks, then Breslow

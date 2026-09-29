@@ -30,6 +30,8 @@ from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-figc")
 
+from model_names import display_name as model_display_name, is_main_model
+
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
@@ -42,9 +44,15 @@ GROUP_DIR = "Table1_Cindex_Main"
 OUTPUT_SERIES = "FigC_KM_curves"
 LAYER_PREFIX_RE = re.compile(r"^(L\d+)")
 OURS_MODEL_TOKEN_RE = re.compile(r"survtri_poe_vae(?:__|_)([A-Za-z][A-Za-z0-9_]*)", re.IGNORECASE)
+MOSAIC_MODEL_PREFIX = "mosaic_surv"
+# 遗留区 results/Cfilm_Hparam_Eval/ 未改名，主模型目录仍是旧拼写
+LEGACY_MAIN_MODEL_DIR = "survtri_poe_vae_c_film"
 STUDY_FOLDER_RE = re.compile(r"^(L\d+)_([A-Za-z0-9]+)_(full_model_val|poe_model_val)$")
 
-# Cfilm 主模型的 OOF 预测统一使用 hparam 扫描选出的参数点（t018_alpha_beta_learn）
+# 【遗留别名】主模型（Mosaic-Surv，原 Cfilm / survtri_poe_vae_c_film）的 OOF 预测
+# 统一使用 hparam 扫描选出的参数点（t018_alpha_beta_learn）。该 hparam 扫描在遗留区
+# results/Cfilm_Hparam_Eval/ 下，目录名保持 Cfilm 时代的旧拼写、未随本次改名变动，
+# 因此这里的常量名与目录拼写都保留 CFILM_/旧键。
 CFILM_HPARAM_RUN_ID = "t018_alpha_beta_learn"
 CFILM_HPARAM_ROOT = PROJECT_ROOT / "results" / "Cfilm_Hparam_Eval" / "Table1" / CFILM_HPARAM_RUN_ID
 
@@ -132,18 +140,18 @@ class KMResult:
 
 
 def normalize_ours_model_name(token: str) -> str:
-    parts = [part for part in str(token).split("_") if part]
-    if not parts:
-        return str(token)
-    parts[0] = parts[0].upper()
-    parts[1:] = [part.lower() for part in parts[1:]]
-    return "_".join(parts)
+    """展示名统一走 results_display/scripts/model_names.py 的集中映射：
+    映射内（mosaic_surv 家族及 Cfilm 旧拼写）给论文正式名，映射外保持旧 CamelCase。"""
+    return model_display_name(token)
 
 
 def extract_model_name(kind: str, csv_path: Path) -> str:
     model_dir = csv_path.parent.name
     if kind != "ours":
         return model_dir
+    if model_dir.lower().startswith(MOSAIC_MODEL_PREFIX):
+        # 新目录名即 --modality 注册键（mosaic_surv / mosaic_surv_single / ...）
+        return normalize_ours_model_name(model_dir)
     match = OURS_MODEL_TOKEN_RE.search(model_dir)
     if match:
         return normalize_ours_model_name(match.group(1))
@@ -654,12 +662,21 @@ def savefig(fig: plt.Figure, path: Path, *, pdf: bool = False) -> None:
     plt.close(fig)
 
 
+MODEL_FILE_STEM_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def model_file_stem(model: str) -> str:
+    """单模型 PNG 的文件名：正式名里的空格与斜杠（w/、w/o）等换成下划线。"""
+    stem = MODEL_FILE_STEM_RE.sub("_", str(model)).strip("_")
+    return stem or "model"
+
+
 def plot_per_model(result: KMResult, out_dir: Path, time_unit: str = "month", annotate_hr: bool = False) -> None:
     fig, ax = plt.subplots(figsize=(5.4, 4.3))
     ax.set_title(f"{result.model} ({result.model_type})", fontsize=11, loc="left")
     draw_km(ax, result, with_legend=True, annotate_hr=annotate_hr)
     style_km_axis(ax, time_unit=time_unit)
-    savefig(fig, out_dir / result.model)
+    savefig(fig, out_dir / model_file_stem(result.model))
 
 
 def grid_shape(n: int) -> tuple[int, int]:
@@ -775,27 +792,30 @@ def write_experiment_matrix(test_dir: str, output_root: Path, study_tokens: list
 
 
 def remap_cfilm_hparam(runs: list[ModelRun], study_token: str) -> None:
-    """Cfilm 的预测目录替换为 hparam 参数点 t018_alpha_beta_learn 的结果目录。
+    """主模型（Mosaic-Surv，原 Cfilm）的预测目录替换为 hparam 参数点
+    t018_alpha_beta_learn 的结果目录。
 
+    【遗留别名】该参数点目录在遗留区 results/Cfilm_Hparam_Eval/ 下，模型目录名
+    仍是旧拼写 `survtri_poe_vae_c_film`（遗留区未改名），故此处按旧拼写查找；
     找不到对应文件夹时保留原目录并警告（例如 hparam 扫描未覆盖的数据集）。
     """
     study = STUDY_TOKEN_TO_NAME.get(study_token)
     if study is None:
         return
     for run in runs:
-        if run.model != "C_film":
+        if not is_main_model(run.model):
             continue
         candidates = [
-            child / "survtri_poe_vae_c_film"
+            child / LEGACY_MAIN_MODEL_DIR
             for child in sorted(CFILM_HPARAM_ROOT.glob(f"{study}__*"))
         ]
         model_dir = next((c for c in candidates if c.is_dir()), None)
         if model_dir is None:
-            print(f"[WARN] {CFILM_HPARAM_RUN_ID} Cfilm missing for {study_token}; keep original {run.model_dir}")
+            print(f"[WARN] {CFILM_HPARAM_RUN_ID} main model missing for {study_token}; keep original {run.model_dir}")
             continue
         run.model_dir = model_dir
         run.csv_path = model_dir / "test_result.csv"
-        print(f"[OVERRIDE] C_film -> {CFILM_HPARAM_RUN_ID}: {model_dir}")
+        print(f"[OVERRIDE] {run.model} -> {CFILM_HPARAM_RUN_ID}: {model_dir}")
 
 
 def collect_runs(experiment_dir: Path, layer_dir: str, study_token: str) -> list[ModelRun]:

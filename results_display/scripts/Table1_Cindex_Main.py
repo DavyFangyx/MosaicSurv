@@ -20,6 +20,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from model_names import display_name as model_display_name
+
 
 GROUP_DIR = "Table1_Cindex_Main"
 LAYER_PREFIX_RE = re.compile(r"^(L\d+)")
@@ -37,16 +39,12 @@ STUDY_SPECS = [
 FIVE_DATASET_STUDIES = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc"]
 
 BASELINE_MODEL_SPECS = [
+    # 官方清单（configs/z_exp_gen/Table1_cindex_main/gen_baselines/_common.bash
+    # 里启用的 preset），没有结果的模型在表里显示 "-"。
     ("P", "abmil_wsi"),
-    ("P", "mlp_wsi"),
     ("P", "transmil_wsi"),
-    ("C", "clinic_cox"),
-    ("C", "mlp_clinic_mean"),
     ("C", "mlp_clinic_flatten"),
-    ("C", "snn_clinic_mean"),
     ("C", "snn_clinic_flatten"),
-    ("G", "mlp_gene"),
-    ("G", "snn_gene"),
     ("G", "mlp_gene_f"),
     ("G", "snn_gene_f"),
     ("P+C", "survpc_f"),
@@ -55,10 +53,20 @@ BASELINE_MODEL_SPECS = [
     ("P+G", "mcat"),
     ("C+G", "survgc_f"),
     ("P+C+G", "survpgc_f"),
+    ("P+C+G", "hgcn"),
+    # 以下基线在 gen_baselines/_common.bash 里已注释（不在官方清单内），
+    # 保留备查；旧批次结果目录仍在（L0Test_BeforeTune / L4Test 等）。
+    # ("P", "mlp_wsi"),
+    # ("C", "clinic_cox"),
+    # ("C", "mlp_clinic_mean"),
+    # ("C", "snn_clinic_mean"),
+    # ("G", "mlp_gene"),
+    # ("G", "snn_gene"),
 ]
 
 TYPE_ORDER = {"P": 0, "C": 1, "G": 2, "P+C": 3, "P+G": 4, "C+G": 5, "P+C+G": 6, "Ours": 7, "Other": 99}
 OURS_MODEL_TOKEN_RE = re.compile(r"survtri_poe_vae(?:__|_)([A-Za-z][A-Za-z0-9_]*)", re.IGNORECASE)
+MOSAIC_MODEL_PREFIX = "mosaic_surv"
 
 GROUP_CONFIG = {
     "baselines": {
@@ -160,6 +168,9 @@ def extract_model_name(kind: str, csv_path: Path) -> str:
     if kind != "ours":
         return model_dir
 
+    if model_dir.lower().startswith(MOSAIC_MODEL_PREFIX):
+        # 新目录名即 --modality 注册键（mosaic_surv / mosaic_surv_single / ...）
+        return model_display_name(model_dir)
     match = OURS_MODEL_TOKEN_RE.search(model_dir)
     if match:
         return normalize_ours_model_name(match.group(1))
@@ -169,12 +180,10 @@ def extract_model_name(kind: str, csv_path: Path) -> str:
 
 
 def normalize_ours_model_name(token: str) -> str:
-    parts = [part for part in str(token).split("_") if part]
-    if not parts:
-        return str(token)
-    parts[0] = parts[0].upper()
-    parts[1:] = [part.lower() for part in parts[1:]]
-    return "_".join(parts)
+    """展示名统一走 results_display/scripts/model_names.py 的集中映射：
+    映射内的模型（mosaic_surv 家族及其 Cfilm 旧拼写）给论文正式名，
+    映射外（遗留 preset 如 survtri_poe_vae_C）保持旧的 CamelCase 规则。"""
+    return model_display_name(token)
 
 
 def ours_model_sort_key(model: str) -> tuple[str, str]:
