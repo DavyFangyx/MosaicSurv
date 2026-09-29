@@ -1,32 +1,33 @@
 # Test1-4 各模型超参数：算法视角说明（MosaicSurv 主模型）
 
-主模型为 `mosaic_surv`（MosaicSurv）。本文档说明 Test1-4 四个实验中
+主模型为 `mosaic_surv`（MosaicSurv）。本文档（算法版）说明 Test1-4 四个实验中
 各模型超参数的使用规则：哪些模型随 MosaicSurv 公共超参一起变化、哪些保持独立、
-哪些绑定关系是代码里已有的。
+哪些绑定关系是代码里已有的。执行版（生成脚本与绑定机制）见同目录
+`Test1-4_MosaicSurv_Hparams.md`。
 
 ## 模型分类总览
 
 | 类别 | 模型（preset） | 出现位置 | 超参使用 |
 |---|---|---|---|
-| **主模型** | `mosaic_surv`（MosaicSurv） | Test1 / Test2 / Test3 / Test4（消融参照行） | `mosaic_hparams.sh` 全套 9 键 |
+| **主模型** | `mosaic_surv`（MosaicSurv） | Test1 / Test2 / Test3 / Test4（消融参照行） | `mosaic_hparams.sh` 全套 10 键 |
 | **基线**（Test1） | `abmil_wsi`、`mlp_wsi`、`transmil_wsi`、`mlp/snn_clinic_mean/flatten`、`clinic_cox`、`mlp_gene`、`snn_gene`、`survpc_f`、`porpoise`、`survpath`、`mcat`、`survgc_f`、`survpgc_f` | 仅 Test1 | defaults + 脚本默认，与 MosaicSurv 无关 |
 | **基线**（Test2） | `modality_concat_zero`、`modality_concat_mean`、`mvae_poe`、`mopoe`、`hgcn` | 仅 Test2 | 同上（hgcn 的 batch 由 presets.sh 硬绑 32） |
 | **基线**（Test3） | `hgcn` | 仅 Test3 | 同上 |
-| **消融**（仅 Table4） | `mosaic_surv_single`、`mosaic_surv_single_enum`、`mosaic_surv_noenum`、`mosaic_surv_multi`、`mosaic_surv_twostage`、`mosaic_surv_frozen`、`mosaic_surv_kl`、`mosaic_surv_nojeffreys`、`mosaic_surv_detached` | 仅 Test4 | `mosaic_hparams.sh` 全套 9 键（消融维度例外见 Test4 节） |
+| **消融**（仅 Table4） | `mosaic_surv_single`、`mosaic_surv_single_enum`、`mosaic_surv_noenum`、`mosaic_surv_multi`、`mosaic_surv_twostage`、`mosaic_surv_frozen`、`mosaic_surv_kl`、`mosaic_surv_nojeffreys`、`mosaic_surv_detached` | 仅 Test4 | `mosaic_hparams.sh` 全套 10 键（消融维度例外见 Test4 节） |
 
 POE 家族其余成员（`survtri_poe_vae_A`、`B`、`C`、`B_single`、`B_multi` 等）
 在主表 Test1-3 中全部注释不用，不作为基线出现在任何主表中。
 
 ## 0. 参数归属一句话结论
 
-- **MosaicSurv 公共超参 9 键**：`LR`、`REG`、`POE_SURV_LAMBDA`、`POE_BETA_TARGET`、
-  `POE_MODALITY_DROPOUT`、`POE_MMHID`、`BATCH_SIZE`、`ALPHAFIX`、`ALPHAPGC`。
+- **MosaicSurv 公共超参 10 键**：`LR`、`REG`、`POE_SURV_LAMBDA`、`POE_BETA_TARGET`、
+  `POE_MODALITY_DROPOUT`、`POE_MMHID`、`BATCH_SIZE`、`ALPHAFIX`、`ALPHAPGC`、`BETAFIX`。
 - **与 MosaicSurv 相同**：Test1/2/3 的主模型 MosaicSurv 本身；Test4 全部 10 个消融 preset
   （公平消融：除消融维度外超参必须一致）。
-- **独立**：Test1-3 的基线模型；9 键之外的公共参数（stage1 三键、`BETAFIX`、
+- **独立**：Test1-3 的基线模型；10 键之外的公共参数（stage1 三键、
   架构参数、训练计划）。
 - POE 家族其余成员（A/B/C 系变体）已全部退出主表，其中消融相关的降级到 Test4，
-  共享 9 键。
+  共享 10 键。
 
 ## 1. MosaicSurv 算法结构与数学形式
 
@@ -162,32 +163,39 @@ epoch ≥ 2 → 0.1。**先纯学重建、再逐步压先验对齐**，避免训
 C 系 stage2 直接进入联合训练（`models/model_SurvTriPoEVAE.py:65` 把 C 的
 `training_stage` 初始为 stage2）；A/B 系先走 stage1（`utils/core_utils.py:2738`）。
 
-## 2. MosaicSurv 公共超参 9 键：逐项算法含义
+## 2. MosaicSurv 公共超参 10 键：逐项算法含义
+
+下表取值来源：optuna 点 `t018_alpha_beta_learn`
+（`Cfilm_Hparam_Eval/cfilm_table1_hparams.csv` 的 t018 行）。
 
 | # | 键 | 值 | 算法作用 | 变化方向的影响（由数学形式推出） |
 |---|---|---|---|---|
 | 1 | `LR` | 0.001 | C 系单参数组学习率：编码器/PoE/解码器/生存头同一 lr | —（通用优化器参数） |
-| 2 | `REG` | 1e-05 | L2 weight decay | —（通用正则） |
-| 3 | `POE_SURV_LAMBDA` | 2.0 | λ：L_surv 在联合损失中的权重 | λ↑ → 表示学习偏向判别性（Cox）；λ↓ → 偏向生成性（VAE 重建）。A/B 范式 stage2 无 VAE 项，此键不生效 |
+| 2 | `REG` | 0.0001 | L2 weight decay | —（通用正则） |
+| 3 | `POE_SURV_LAMBDA` | 1.0 | λ：L_surv 在联合损失中的权重 | λ↑ → 表示学习偏向判别性（Cox）；λ↓ → 偏向生成性（VAE 重建）。A/B 范式 stage2 无 VAE 项，此键不生效 |
 | 4 | `POE_BETA_TARGET` | 0.1 | β：Jeffreys 项权重（warmup 目标值，见 1.6） | β↑ → 潜空间更贴近先验（更规则、模态间更对齐），重建压力相对下降 |
 | 5 | `POE_MODALITY_DROPOUT` | 0.35 | 训练期每模态独立丢弃概率（见 1.5） | ↑ → 缺失鲁棒性强、但每模态可见信息变少；0 = 关闭随机缺失 |
 | 6 | `POE_MMHID` | 128 | 生存读出 MLP（fuse_fc / FiLMHead / MultiPatternHead）隐层宽。注意潜空间 `latent_dim=128` 是独立架构参数，不在此键 | ↑ → 读出层容量增加 |
 | 7 | `BATCH_SIZE` | 16 | stage2 训练 batch（val/test 恒为 1） | ↑ → Cox 损失在更大 risk 集合上排序，但 pattern 枚举的子集拆分更细 |
 | 8 | `ALPHAFIX` | false | PoE 专家权重 α 可学习（softmax logits，初始等权）；true = 用 `ALPHAPGC` 固定值 | false → 数据决定专家权重；true → 人为设定（可作消融对照） |
 | 9 | `ALPHAPGC` | 空 | 固定 α=(α_P,α_G,α_C)，归一化到和为 1，仅 `ALPHAFIX=true` 时生效；空串 = 不传该 flag | 只在 ALPHAFIX=true 时有意义 |
+| 10 | `BETAFIX` | false | β warmup 开关（与 `ALPHAFIX` 并列的可控开关，见 1.6）：false = β 从 0 线性升到 `POE_BETA_TARGET`；true = 全程恒为 `POE_BETA_TARGET` | false → 先纯学重建、再逐步压先验对齐；true → 训练初期 Jeffreys 项即满权重，潜空间可能过早压向先验 |
 
 各键在代码中的位置：λ、β 组合见 `models/model_SurvTriPoEVAE.py:287-290`；
 α 见 `model_utils.py:398`；dropout 见 `missing_mask_protocol.py:360`；
-mmhid 见 `model_utils.py:578,599`。
+mmhid 见 `model_utils.py:578,599`；`BETAFIX` 见 `utils/core_utils.py:1732`（`_get_poe_beta`）。
 
 ## 3. 独立超参（不随 MosaicSurv 变化的键）
 
-测
+以下键不在公共 10 键之内（`ALPHAFIX`/`ALPHAPGC`/`BETAFIX` 属公共键，见 §2）：
+
+| 键 | 值 | 来源 | 说明 |
+|---|---|---|---|
 | `OPT` / `LR_SCHEDULER` / `REG_TYPE` | radam / cosine / L2 | `defaults.conf` | 优化器与调度器 |
 | `BATCH_SIZE_STAGE1` | 128 | Table 脚本 | stage1 VAE 预训练 batch（只 mosaic_surv_frozen/mosaic_surv_twostage 用）；保持历史配置，不随 stage2 `BATCH_SIZE=16` 联动 |
 | `LR_STAGE1` | 1e-4 | `defaults.conf` | stage1 AdamW 学习率（只 mosaic_surv_frozen/mosaic_surv_twostage 用） |
 | `MAX_EPOCHS_STAGE1` | 10 | Table 脚本 | stage1 预训练 epoch |
-| `MAX_EPOCHS` / `WARMUP_EPOCHS` | 20 / 3 | Table 脚本 | 总 epoch / β warmup 长度（β 具体值由 9 键决定，长度独立） |
+| `MAX_EPOCHS` / `WARMUP_EPOCHS` | 20 / 3 | Table 脚本 | 总 epoch / β warmup 长度（β 具体值由公共键 `POE_BETA_TARGET`/`BETAFIX` 决定，长度独立） |
 | `POE_DECODER_HIDDEN_DIM` | 512 | `defaults.conf` | 三模态解码器隐层宽（架构参数，不属于调参集） |
 | `POE_TRANSFORMER_LAYERS` | 1 | `defaults.conf` | 各模态编码器 transformer 层数（架构参数） |
 | `latent_dim` | 128 | 代码默认 | 联合潜空间维度（架构参数，无 .conf 键） |
@@ -198,12 +206,12 @@ mmhid 见 `model_utils.py:578,599`。
 
 | 实验 | 与 MosaicSurv 相同的键 | 例外（算法原因） | 独立（不随 MosaicSurv 变化） |
 |---|---|---|---|
-| Test1（Table1 主表） | 主模型 MosaicSurv：全套 9 键 | 无 | 基线（14 个，与 POE 家族无关）用 defaults + 脚本默认，batch=1 |
-| Test2（Table2 缺失模态） | MosaicSurv：全套 9 键 | 无 | 5 个基线（modality_concat×2、mvae_poe、mopoe、hgcn）；hgcn batch=32 硬绑 |
-| Test3（Table3 缺失配比） | MosaicSurv：8 键 | `POE_MODALITY_DROPOUT=0`：unified_mask_csv 下缺失由共享 mask csv 决定，随机 drop 被强制归零（`missing_mask_protocol.py:338`），写 0 是显式化 | hgcn（batch=32 硬绑） |
-| Test4（Table4 消融） | 全部 10 个 preset：全套 9 键 | `mosaic_surv_nojeffreys` 的 `POE_BETA_TARGET=0`——改超参即消融本身（去掉 J 项） | stage1 三键（`LR_STAGE1`/`MAX_EPOCHS_STAGE1`/`BATCH_SIZE_STAGE1`）只作用于 mosaic_surv_frozen/mosaic_surv_twostage；其余独立键同 §3 |
+| Test1（Table1 主表） | 主模型 MosaicSurv：全套 10 键 | 无 | 基线（14 个，与 POE 家族无关）用 defaults + 脚本默认，batch=1 |
+| Test2（Table2 缺失模态） | MosaicSurv：全套 10 键 | 无 | 5 个基线（modality_concat×2、mvae_poe、mopoe、hgcn）；hgcn batch=32 硬绑 |
+| Test3（Table3 缺失配比） | MosaicSurv：全套 10 键，唯一例外 `POE_MODALITY_DROPOUT=0` | unified_mask_csv 下缺失由共享 mask csv 决定，随机 drop 被强制归零（`missing_mask_protocol.py:338`），写 0 是显式化 | hgcn（batch=32 硬绑） |
+| Test4（Table4 消融） | 全部 10 个 preset：全套 10 键 | `mosaic_surv_nojeffreys` 的 `POE_BETA_TARGET=0`——改超参即消融本身（去掉 J 项） | stage1 三键（`LR_STAGE1`/`MAX_EPOCHS_STAGE1`/`BATCH_SIZE_STAGE1`）只作用于 mosaic_surv_frozen/mosaic_surv_twostage；其余独立键同 §3 |
 
-（各实验启用哪些模型、哪些注释，见执行版文档的模型分类总览。）
+（各实验启用哪些模型、哪些注释，见执行版文档 `Test1-4_MosaicSurv_Hparams.md` 的模型分类总览。）
 
 ## 5. Test4 消融：差异在计算图，不在超参
 

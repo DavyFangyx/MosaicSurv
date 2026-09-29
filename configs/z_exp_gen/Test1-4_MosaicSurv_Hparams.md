@@ -1,8 +1,9 @@
 # Test1-4 各模型超参数使用说明（MosaicSurv 主模型）
 
-主模型为 `mosaic_surv`（MosaicSurv）。本文档说明 Test1-4 四个实验中
+主模型为 `mosaic_surv`（MosaicSurv）。本文档（执行版）说明 Test1-4 四个实验中
 各模型超参数的使用规则：哪些模型随 MosaicSurv 公共超参一起变化、哪些保持独立、
-哪些绑定关系是代码里已有的。
+哪些绑定关系是代码里已有的。配套的算法视角说明见同目录
+`Test1-4_MosaicSurv_Hparams_Algo.md`。
 
 ## 模型分类总览
 
@@ -20,13 +21,14 @@ POE 家族其余成员（`survtri_poe_vae_A`、`B`、`C`、`B_single`、`B_multi
 ## 1. MosaicSurv 公共超参的唯一来源
 
 `configs/z_exp_gen/mosaic_hparams.sh` 是四个实验 MosaicSurv 公共超参的**唯一来源与入口**，
-修改该文件即可同时改变四个实验。当前值：
+修改该文件即可同时改变四个实验。当前取值来自 optuna 点 `t018_alpha_beta_learn`
+（`Cfilm_Hparam_Eval/cfilm_table1_hparams.csv` 的 t018 行）：
 
 | 键（.conf 键名） | 值 |
 |---|---|
 | `LR` | 0.001 |
-| `REG` | 1e-05 |
-| `POE_SURV_LAMBDA` | 2.0 |
+| `REG` | 0.0001 |
+| `POE_SURV_LAMBDA` | 1.0 |
 | `POE_BETA_TARGET` | 0.1 |
 | `POE_MODALITY_DROPOUT` | 0.35 |
 | `POE_MMHID` | 128 |
@@ -111,7 +113,7 @@ POE 家族降级的 A/B/C 系都在这里做消融。**全部 10 个消融 prese
 | C 损失项 | `mosaic_surv_kl`、`mosaic_surv_nojeffreys`、`mosaic_surv_detached` | 损失项 | 全套 10 键 |
 
 **例外**：`mosaic_surv_nojeffreys` 的 conf 中 `POE_BETA_TARGET=0`（由 `_common.bash` 的
-preset 覆盖逻辑写回 0，其余 9 键与主模型一致）；`mosaic_surv_detached`/`kl`/`noenum`
+preset 覆盖逻辑写回 0，10 键中其余 9 键与主模型一致）；`mosaic_surv_detached`/`kl`/`noenum`
 的消融在模型内部实现，公共超参保持不变。
 
 ## 3. 已有的绑定机制（代码里一直存在的）

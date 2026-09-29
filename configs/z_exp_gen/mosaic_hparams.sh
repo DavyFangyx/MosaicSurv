@@ -1,6 +1,7 @@
 #!/bin/bash
 # configs/z_exp_gen/mosaic_hparams.sh
 # MosaicSurv 主模型最终超参数 —— Test1-4 的唯一来源与入口，直接修改本文件即可。
+# 取值来源：optuna t018_alpha_beta_learn（Cfilm_Hparam_Eval/cfilm_table1_hparams.csv）
 #
 # 各 test 生成脚本 source 本文件后，把 mosaic_conf_lines 的输出
 # （或各 MOSAIC_* 变量）嵌入生成的 .conf；键名与 run.sh 读取的 .conf 键一致。
@@ -12,8 +13,8 @@
 #   （如 hgcn 固定 BATCH_SIZE=32，不受本文件影响）
 
 MOSAIC_LR=0.001
-MOSAIC_REG=1e-05
-MOSAIC_POE_SURV_LAMBDA=2.0
+MOSAIC_REG=0.0001
+MOSAIC_POE_SURV_LAMBDA=1.0
 MOSAIC_POE_BETA_TARGET=0.1
 MOSAIC_POE_MODALITY_DROPOUT=0.35
 MOSAIC_POE_MMHID=128
