@@ -67,23 +67,23 @@ generate_full_model_val_configs() {
 
     local -a wsi_models=(
         abmil_wsi
-        mlp_wsi
+#        mlp_wsi
         transmil_wsi
     )
 
     local -a clinic_models=(
-        mlp_clinic_mean
+#        mlp_clinic_mean
         mlp_clinic_flatten
-        snn_clinic_mean
+#        snn_clinic_mean
         snn_clinic_flatten
-        clinic_cox
+#        clinic_cox
     )
 
     local -a gene_models=(
-        mlp_gene
-        snn_gene
-        # mlp_gene_f
-        # snn_gene_f
+#        mlp_gene
+#        snn_gene
+        mlp_gene_f
+        snn_gene_f
     )
 
     local -a multi_models=(
@@ -93,6 +93,7 @@ generate_full_model_val_configs() {
         mcat
         survgc_f
         survpgc_f
+        hgcn
     )
 
     mkdir -p "$out_dir"
@@ -181,6 +182,10 @@ EOF
                 ;;
             survgc_f)
                 modality_tag="CG"
+                ;;
+            # hgcn 与 survpgc_f 同组：三模态 PCG（默认值即 PCG，此处显式列出）
+            hgcn|survpgc_f)
+                modality_tag="PCG"
                 ;;
         esac
 

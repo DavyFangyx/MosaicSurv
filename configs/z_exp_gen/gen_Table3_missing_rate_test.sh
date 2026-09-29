@@ -67,7 +67,7 @@ else
         survtri_poe_vae_C_film
 #        survtri_poe_vae_B
 #        modality_concat_zero
-#        modality_concat_mean
+        modality_concat_mean
 #        mvae_poe
 #        mopoe
         hgcn
