@@ -11,19 +11,18 @@ The three ablation tests are defined in z_temp/Table4/ablation_checklist.md:
                 mosaic_surv_detached; 原 c_film_kl / c_film_beta0 / c_film_surv0)
 
 Every test is compared against the main model `mosaic_surv` (first row of
-each table). The ablation batch was trained with three hyperparameter
-settings — the rows with `T4` enabled in the manifest
-configs/z_exp_gen/Cfilm_Hparam_Eval/cfilm_table1_hparams.csv — so one
-output folder is written per run_id and each folder holds one c-index table
-per test.
+each table). The whole ablation batch uses the single unified MosaicSurv
+hyperparameters from configs/z_exp_gen/mosaic_hparams.sh（由
+configs/z_exp_gen/gen_Table4_Abaltion_Test.sh 生成，结果目录不带 run_id 后缀）。
 
 Default input:
-    results/Table4_Abaltion_Test/{study}__*__{run_id}/{model}/test_result.csv
+    results/Table4_Abaltion_Test/{study}__* /{model}/test_result.csv
+    （每个 study 一个运行目录，如 tcga_brca__cell_norm__uni_v1）
 
 Default outputs:
-    results_display/Table4_Abaltion_Test/{run_id}/summary_A_readout_5datasets.csv
-    results_display/Table4_Abaltion_Test/{run_id}/summary_B_training_5datasets.csv
-    results_display/Table4_Abaltion_Test/{run_id}/summary_C_loss_5datasets.csv
+    results_display/Table4_Abaltion_Test/summary_A_readout_5datasets.csv
+    results_display/Table4_Abaltion_Test/summary_B_training_5datasets.csv
+    results_display/Table4_Abaltion_Test/summary_C_loss_5datasets.csv
 
 Every table keeps the classic summary_5datasets.csv row/column layout:
 rows are models, columns are the five datasets plus a mean column. Missing
@@ -81,27 +80,6 @@ MODEL_LABELS = {
 
 def project_root_from_script() -> Path:
     return Path(__file__).resolve().parents[2]
-
-
-def default_hparams_path() -> Path:
-    return (
-        project_root_from_script()
-        / "configs/z_exp_gen/Cfilm_Hparam_Eval/cfilm_table1_hparams.csv"
-    )
-
-
-def read_t4_run_ids(path: Path) -> list[str]:
-    """run_ids of the rows with `T4` enabled in the hparam manifest."""
-    with path.open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
-
-    def is_enabled(value: str) -> bool:
-        return (value or "").strip().lower() in {"t4", "1", "true", "yes", "on"}
-
-    run_ids = [row.get("run_id", "").strip() for row in rows if is_enabled(row.get("T4") or "")]
-    if not run_ids:
-        raise SystemExit(f"No T4-enabled rows in {path}")
-    return run_ids
 
 
 def load_cindex_stats(csv_path: Path) -> tuple[float, float] | None:
@@ -171,10 +149,9 @@ def collect_run(
     results_root: Path,
     *,
     group_dir: str,
-    run_id: str,
     models: set[str],
 ) -> tuple[dict[str, dict[str, str]], dict[str, list[str]]]:
-    """Collect `mean ± std` text per study/model for one run_id folder."""
+    """Collect `mean ± std` text per study/model for the unified single batch."""
     results_dir = results_root / group_dir
     if not results_dir.is_dir():
         raise FileNotFoundError(f"Missing results directory: {results_dir}")
@@ -183,14 +160,14 @@ def collect_run(
     missing: dict[str, list[str]] = {}
 
     for study in STUDIES:
-        run_dirs = sorted(results_dir.glob(f"{study}__*__{run_id}"))
+        run_dirs = sorted(results_dir.glob(f"{study}__*"))
         if not run_dirs:
             for model in models:
                 missing.setdefault(model, []).append(study)
             continue
         if len(run_dirs) > 1:
             print(
-                f"[WARN] Multiple run dirs for {study}/{run_id}: "
+                f"[WARN] Multiple run dirs for {study}: "
                 f"{[path.name for path in run_dirs]}; using {run_dirs[0].name}"
             )
         run_dir = run_dirs[0]
@@ -236,18 +213,20 @@ def write_table(frame: pd.DataFrame, out_dir: Path, group_key: str) -> None:
 
 
 def clean_legacy_outputs(out_root: Path) -> None:
-    """Remove the old flat outputs (single summary.csv/summary_5datasets.csv
-    plus per-study summary/), superseded by the per-run_id folder layout.
-    Only called when --clean-legacy is passed explicitly."""
+    """Remove legacy display outputs: the old flat files (summary.csv /
+    summary_5datasets.csv / summary/) and the per-run_id folders of the
+    superseded three-batch layout (t025_alpha_learn / t028_orig /
+    t028_alpha_learn). Only called when --clean-legacy is passed explicitly."""
     for name in ("summary.csv", "summary_5datasets.csv"):
         path = out_root / name
         if path.exists():
             path.unlink()
             print(f"[CLEAN] {path.relative_to(project_root_from_script())}")
-    legacy_dir = out_root / "summary"
-    if legacy_dir.is_dir():
-        shutil.rmtree(legacy_dir)
-        print(f"[CLEAN] {legacy_dir.relative_to(project_root_from_script())}")
+    for name in ("summary", "t025_alpha_learn", "t028_orig", "t028_alpha_learn"):
+        legacy_dir = out_root / name
+        if legacy_dir.is_dir():
+            shutil.rmtree(legacy_dir)
+            print(f"[CLEAN] {legacy_dir.relative_to(project_root_from_script())}")
 
 
 def main() -> None:
@@ -273,34 +252,14 @@ def main() -> None:
         help="Grouped results/output directory name",
     )
     parser.add_argument(
-        "--hparams",
-        type=Path,
-        default=default_hparams_path(),
-        help=(
-            "hparam manifest CSV; T4-enabled rows select the run_id folders "
-            "(default: configs/z_exp_gen/Cfilm_Hparam_Eval/cfilm_table1_hparams.csv)"
-        ),
-    )
-    parser.add_argument(
-        "--run-ids",
-        dest="run_ids",
-        action="append",
-        help=(
-            "run_id folder(s) to collect; repeat this option to select "
-            "multiple run_ids (default: T4-enabled rows of --hparams)"
-        ),
-    )
-    parser.add_argument(
         "--clean-legacy",
         action="store_true",
         help=(
-            "Delete the legacy flat outputs (summary.csv, "
-            "summary_5datasets.csv, summary/) before writing"
+            "Delete the legacy display outputs (flat summary files and the "
+            "per-run_id folders of the superseded three-batch layout) before writing"
         ),
     )
     args = parser.parse_args()
-
-    run_ids = args.run_ids or read_t4_run_ids(args.hparams)
 
     out_root = args.output_root / args.group_dir
     if args.clean_legacy:
@@ -310,22 +269,20 @@ def main() -> None:
         model for models in GROUP_SPECS.values() for model in models
     }
 
-    for run_id in run_ids:
-        study_to_model_text, missing = collect_run(
-            args.results_root,
-            group_dir=args.group_dir,
-            run_id=run_id,
-            models=all_models,
-        )
-        for group_key in GROUP_SPECS:
-            frame = build_table_frame(study_to_model_text, group_key)
-            write_table(frame, out_root / run_id, group_key)
+    study_to_model_text, missing = collect_run(
+        args.results_root,
+        group_dir=args.group_dir,
+        models=all_models,
+    )
+    for group_key in GROUP_SPECS:
+        frame = build_table_frame(study_to_model_text, group_key)
+        write_table(frame, out_root, group_key)
 
-        total_cells = len(STUDIES) * len(all_models)
-        complete_cells = total_cells - sum(len(studies) for studies in missing.values())
-        print(f"[RUN] {run_id}: {complete_cells}/{total_cells} cells complete")
-        for model, studies in sorted(missing.items()):
-            print(f"[MISSING] {run_id}/{model}: {', '.join(studies)}")
+    total_cells = len(STUDIES) * len(all_models)
+    complete_cells = total_cells - sum(len(studies) for studies in missing.values())
+    print(f"[RUN] {complete_cells}/{total_cells} cells complete")
+    for model, studies in sorted(missing.items()):
+        print(f"[MISSING] {model}: {', '.join(studies)}")
 
     print("Done.")
 
