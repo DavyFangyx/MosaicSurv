@@ -2,11 +2,14 @@
 Collect Table 2 missing-modality c-index summaries.
 
 Default input:
-    results/Table2_Baselines/{study}__L4__gene_raw__uni_v1/{model}/eval_subsets/{subset}/test_result.csv
+    results/Table2_Baselines/{study}__L0__gene_raw__uni_v1/{model}/eval_subsets/{subset}/test_result.csv
 
 Default outputs:
     results_display/Table2_Modality_Missing_Tset/{study}_model_summary.csv
     results_display/Table2_Modality_Missing_Tset/summary.csv
+    results_display/Table2_Modality_Missing_Tset/baseline_ranking.png
+        （每个测试子集一个 panel：官方模型按固定顺序的 C-index 竖条 +
+        误差线 + 排名数字；主模型第一红框、胜过 hgcn 蓝框）
 
 Models default to the official whitelist (OFFICIAL_MODELS below, same set as
 configs/z_exp_gen/gen_Table2_missing_modality_baselines.sh PRESETS).
@@ -26,8 +29,13 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import re
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import pandas as pd
 
 from model_names import display_name
@@ -65,6 +73,18 @@ SUBSETS = ["P", "C", "G", "PC", "PG", "CG", "PCG"]
 # Summary-table big-row order (Clinical first) and coverage: only the six
 # missing-type scenarios, PCG is left to the per-study tables.
 SUMMARY_SUBSETS = ["C", "P", "G", "PC", "CG", "PG"]
+
+# baseline_ranking.png 的模型配色（沿用 Cfilm hparam-eval 时代的零/均值/hgcn 配色，
+# 主模型红色；mvae_poe / mopoe 为新增基线）。
+MODEL_COLORS = {
+    "Mosaic-Surv (Ours)": "#d62728",
+    "modality_concat_zero": "#1f77b4",
+    "modality_concat_mean": "#2ca02c",
+    "mvae_poe": "#ff7f0e",
+    "mopoe": "#9467bd",
+    "hgcn": "#7f7f7f",
+}
+MODEL_COLOR_FALLBACK = "#17becf"
 
 
 def project_root_from_script() -> Path:
@@ -303,6 +323,113 @@ def write_summary_table(summary_df: pd.DataFrame, output_root: Path) -> Path:
     return out_path
 
 
+def parse_mean_std_from_text(value: str) -> tuple[float, float] | None:
+    """解析 "0.6595 ± 0.0606(1)" 形式的单元格，返回 (mean, std)；缺失返回 None。"""
+    text = str(value).strip()
+    if text in {"", "-", "nan"} or "±" not in text:
+        return None
+    mean_s, rest = text.split("±", 1)
+    rest = re.sub(r"\(\d+\)$", "", rest.strip()).strip()
+    try:
+        return float(mean_s.strip()), float(rest)
+    except ValueError:
+        return None
+
+
+def write_ranking_figure(summary_df: pd.DataFrame, output_root: Path) -> Path:
+    """baseline_ranking.png：summary.csv 的图示版。
+
+    每个测试子集一个 panel，模型按官方顺序固定排列（竖条 = 5 数据集
+    mean±std 均值），条顶标注排名；主模型第一时红框、胜过 hgcn 时蓝框。
+    """
+    studies = [study for _, study in STUDY_SPECS]
+    models = [model_label(name) for name in OFFICIAL_MODELS]
+
+    cell_stats: dict[tuple[str, str], list[tuple[float, float]]] = {}
+    for subset in SUMMARY_SUBSETS:
+        for model in models:
+            pairs = []
+            for study in studies:
+                cell = summary_df.loc[(subset, model), study]
+                parsed = parse_mean_std_from_text(cell)
+                if parsed is not None:
+                    pairs.append(parsed)
+            cell_stats[(subset, model)] = pairs
+
+    fig, axes = plt.subplots(2, 3, figsize=(15.5, 8.5), constrained_layout=True)
+    for idx, subset in enumerate(SUMMARY_SUBSETS):
+        ax = axes[idx // 3, idx % 3]
+        panel_values = {}
+        for model in models:
+            pairs = cell_stats[(subset, model)]
+            if not pairs:
+                continue
+            panel_values[model] = (
+                sum(mean for mean, _ in pairs) / len(pairs),
+                sum(std for _, std in pairs) / len(pairs),
+            )
+        available = [
+            (model, stats)
+            for model, stats in panel_values.items()
+            if stats is not None
+        ]
+        ranked = sorted(available, key=lambda item: (-item[1][0], item[0]))
+        ranks = {model: rank for rank, (model, _) in enumerate(ranked, start=1)}
+
+        ours_stats = panel_values.get("Mosaic-Surv (Ours)")
+        hgcn_stats = panel_values.get("hgcn")
+        frame_color = None
+        if ours_stats is not None and ranks.get("Mosaic-Surv (Ours)") == 1:
+            frame_color = "#d62728"
+        elif (
+            ours_stats is not None
+            and hgcn_stats is not None
+            and ours_stats[0] > hgcn_stats[0]
+        ):
+            frame_color = "#1f77b4"
+        if frame_color is not None:
+            for spine in ax.spines.values():
+                spine.set_color(frame_color)
+                spine.set_linewidth(2.0)
+
+        for k, model in enumerate(models):
+            stats = panel_values.get(model)
+            if stats is None:
+                continue
+            ax.bar(
+                k,
+                stats[0],
+                yerr=stats[1],
+                capsize=2,
+                color=MODEL_COLORS.get(model, MODEL_COLOR_FALLBACK),
+                edgecolor="black",
+                linewidth=0.3,
+            )
+            ax.annotate(
+                str(ranks[model]),
+                xy=(k, stats[0] + stats[1]),
+                xytext=(0, 3),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=7,
+                fontweight="bold",
+            )
+        ax.set_title(f"Test subset {subset}", fontsize=10, pad=6)
+        ax.set_xticks(range(len(models)), models, rotation=55, ha="right", fontsize=6.5)
+        ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.45)
+        if idx % 3 == 0:
+            ax.set_ylabel("C-index")
+
+    out_dir = output_root / DISPLAY_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "baseline_ranking.png"
+    fig.savefig(out_path, dpi=220, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    print(f"[WRITE] {out_path.relative_to(output_root)}")
+    return out_path
+
+
 def main() -> None:
     project_root = project_root_from_script()
     parser = argparse.ArgumentParser(description="Collect Table 2 missing-modality c-index summaries")
@@ -378,6 +505,7 @@ def main() -> None:
         [model_label(dir_name) for dir_name in model_dir_names],
     )
     write_summary_table(summary_df, args.output_root)
+    write_ranking_figure(summary_df, args.output_root)
 
     print("Done.")
 
