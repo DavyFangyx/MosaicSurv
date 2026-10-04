@@ -314,6 +314,13 @@ class SurvTriPoEVAE(nn.Module):
             available_mask=torch.ones_like(cached["available_mask"]),
         )
         cached["risk"] = self.pattern_head(mu_joint_pgc, pattern_id=7)
+        if int(result.get("n_patterns", 1) or 0) == 0 and self.poe_variant in ("A", "B"):
+            # 兜底：batch 样本数不足 min_batch_for_cox（如 epoch 末班不足 8 个样本）时
+            # 所有 pattern 子集都会被跳过，loss 退化为无梯度常数 0；
+            # A/B 变体的损失只含 survival 项，backward 会直接崩溃。
+            # 退化为全体可用联合后验（pattern 7），保证损失有梯度。
+            result["loss"] = loss_fn(h=cached["risk"], t=event_time, c=censor)
+            result["n_patterns"] = 1
         return result["loss"]
 
     def _reshape_gene(self, x_omic):
