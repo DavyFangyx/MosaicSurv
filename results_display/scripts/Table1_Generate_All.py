@@ -5,7 +5,8 @@ Pipeline（对每个实验目录 results/Table1_Cindex_Main/<test-dir>/，
 默认扫描全部；--test-dir 指定单个）：
 
   1. Cox Breslow 前向缓存：为本目录的 cox 类模型（clinic_cox 基线 +
-     mosaic_surv 主模型）补算 fold 级 IBS/AUC（需要 GPU，--skip-cox 可跳过），
+     mosaic_surv 主模型，以及走第三方训练器的 hgcn——Table1_HGCN_Forward）
+     补算 fold 级 IBS/AUC（需要 GPU，--skip-cox 可跳过），
      写入本目录专属缓存
      results_display/.cache_table1/cox_ibs_auc_folds__<test_dir>.csv，
      幂等：已缓存的 (study, model, fold) 不会重算。
@@ -14,9 +15,8 @@ Pipeline（对每个实验目录 results/Table1_Cindex_Main/<test-dir>/，
      AppendixS1_IBS_Matrix / AppendixS2_AUC2y_Matrix / AppendixS3_AUC5y_Matrix）：
      官方口径，5 cohort；Ours 行与本目录树内的官方 mosaic_surv 结果同源
      （旧批次目录目录树内无官方 Ours 时回退遗留 Cfilm hparam-eval 区）。
-     注意：hgcn 的 IBS/AUC 单元格为 "-"——其 runner 不落盘标准
-     split_N_results.pkl（只有 all_*_time.pkl），离线 IBS/AUC 链路读不到
-     fold 级 logits；c-index 行不受影响。
+     hgcn 的 IBS/AUC 单元格由第 1 步的前向缓存补齐（其 runner 不落盘
+     标准 split_N_results.pkl，离线 nll 链路读不到，故走 Breslow 前向）。
 
   3. summary 家族（summary.csv / summary_5datasets.csv / baselines+ours
      的 per-study summary）：同一批结果、同一次运行，8 cohort 全视图，
@@ -60,6 +60,7 @@ from Table1_Paper_Tables import build_tables  # noqa: E402
 LEGACY_COX_CACHE_CSV = ".cache_table1/cox_ibs_auc_folds.csv"
 COX_BASELINE_MODEL_DIRS = ("clinic_cox",)
 OURS_MODEL_DIRS = ("mosaic_surv",)
+HGCN_MODEL_DIRS = ("hgcn",)
 ALL_FOLDS = (0, 1, 2, 3, 4)
 DEFAULT_LEGACY_COX_DIRS = (
     "L0Test_BeforeTune,L0Test After Fix some err,L0Test After fixed modal missing"
@@ -100,7 +101,7 @@ def find_cox_model_dirs(
     layer_dir: str,
     test_dir: str,
 ) -> list[Path]:
-    """本实验目录内的 cox 类模型目录：clinic_cox 基线 + mosaic_surv 主模型。"""
+    """本实验目录内的 cox 类模型目录：clinic_cox / hgcn 基线 + mosaic_surv 主模型。"""
     model_dirs: list[Path] = []
     for study_token, _study in STUDY_SPECS:
         full_dir = resolve_group_study_dir(
@@ -112,7 +113,7 @@ def find_cox_model_dirs(
             GROUP_CONFIG["baselines"]["results_suffix"],
         )
         if full_dir is not None:
-            for name in COX_BASELINE_MODEL_DIRS:
+            for name in (*COX_BASELINE_MODEL_DIRS, *HGCN_MODEL_DIRS):
                 model_dirs.extend(sorted(full_dir.glob(f"**/{name}")))
         poe_dir = resolve_group_study_dir(
             results_root,
@@ -163,8 +164,14 @@ def ensure_cox_cache(
         if not missing:
             print(f"[COX] cached: {study}/{model}")
             continue
-        print(f"[COX] forward: {study}/{model} folds={missing}")
-        process_model_dir(model_dir, missing, cache_path)
+        if model == "hgcn":
+            from Table1_HGCN_Forward import process_hgcn_model_dir
+
+            print(f"[COX] hgcn forward: {study}/{model} folds={missing}")
+            process_hgcn_model_dir(model_dir, missing, cache_path)
+        else:
+            print(f"[COX] forward: {study}/{model} folds={missing}")
+            process_model_dir(model_dir, missing, cache_path)
         coverage.setdefault((study, model), set()).update(missing)
     return cache_path
 
