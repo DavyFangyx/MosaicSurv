@@ -11,6 +11,9 @@ Default outputs:
         stability_summary.csv
         train_missing_rate.png
     results_display/Table3_Train_MissingRate/train_missing_rate.png
+    results_display/Table3_Train_MissingRate/stability_summary.png
+        （3x3 网格 7 个子图，每格是 Δ=HCGN−Mosaic-Surv (Ours) 的着色表，
+        Δ>0 绿 / Δ<0 红，以 0 为中心）
 
 Each CSV is one test subset. Rows are dataset+model. The figure is a 3-column
 grid of the seven subsets, overlaying models by marker/linestyle and datasets by
@@ -29,6 +32,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MultipleLocator
 
@@ -85,6 +89,18 @@ MODEL_STYLES = {
 }
 EXTRA_MODEL_MARKERS = ["s", "D", "v", "P", "X"]
 EXTRA_MODEL_LINESTYLES = ["-.", ":", (0, (5, 1, 1, 1)), (0, (3, 1, 1, 1, 1, 1))]
+STABILITY_METRIC_NAMES = [
+    "curve_std",
+    "curve_range",
+    "adjacent_total_variation",
+    "max_adjacent_change",
+]
+STABILITY_METRIC_LABELS = {
+    "curve_std": "curve_std",
+    "curve_range": "curve_range",
+    "adjacent_total_variation": "adjacent_TV",
+    "max_adjacent_change": "max_adj_change",
+}
 Stats = tuple[float, float]
 SubsetTables = dict[str, dict[str, dict[str, dict[str, Stats]]]]
 
@@ -296,18 +312,10 @@ def write_subset_table(
     return out_path
 
 
-def write_stability_summary(
-    tables: SubsetTables,
-    subset: str,
-    model_names: list[str],
-    output_dir: Path,
-) -> Path:
-    metric_names = [
-        "curve_std",
-        "curve_range",
-        "adjacent_total_variation",
-        "max_adjacent_change",
-    ]
+def stability_model_values(
+    tables: SubsetTables, subset: str, model_names: list[str]
+) -> dict[str, dict[str, dict[str, float]]]:
+    """model -> dataset(+Mean) -> metric -> value；与 stability_summary.csv 同源。"""
     dataset_labels = [label for label, _, _ in STUDY_SPECS]
     model_values: dict[str, dict[str, dict[str, float]]] = {}
     for model_name in model_names:
@@ -334,9 +342,21 @@ def write_stability_summary(
             dataset_values["Mean"] = {
                 name: sum(dataset[name] for dataset in dataset_values.values())
                 / len(dataset_values)
-                for name in metric_names
+                for name in STABILITY_METRIC_NAMES
             }
         model_values[model_name] = dataset_values
+    return model_values
+
+
+def write_stability_summary(
+    tables: SubsetTables,
+    subset: str,
+    model_names: list[str],
+    output_dir: Path,
+) -> Path:
+    metric_names = STABILITY_METRIC_NAMES
+    dataset_labels = [label for label, _, _ in STUDY_SPECS]
+    model_values = stability_model_values(tables, subset, model_names)
 
     column_values = {
         MODEL_DISPLAY_NAMES.get(name, name): model_values[name] for name in model_names
@@ -575,6 +595,119 @@ def write_combined_figure(
     return out_path
 
 
+def stability_delta_matrix(
+    tables: SubsetTables,
+    subset: str,
+    model_names: list[str],
+    dataset_labels: list[str],
+) -> np.ndarray:
+    """metric x dataset 的 Δ=HCGN−Mosaic-Surv (Ours) 矩阵；缺失单元格为 NaN。"""
+    model_values = stability_model_values(tables, subset, model_names)
+    main_values = model_values.get(MAIN_MODEL, {})
+    hgcn_values = model_values.get("hgcn", {})
+    matrix = np.full((len(STABILITY_METRIC_NAMES), len(dataset_labels)), np.nan)
+    for row, metric in enumerate(STABILITY_METRIC_NAMES):
+        for col, label in enumerate(dataset_labels):
+            main_value = main_values.get(label, {}).get(metric)
+            hgcn = hgcn_values.get(label, {}).get(metric)
+            if main_value is not None and hgcn is not None:
+                matrix[row, col] = hgcn - main_value
+    return matrix
+
+
+def write_stability_figure(
+    tables: SubsetTables,
+    model_names: list[str],
+    figure_dir: Path,
+) -> Path:
+    """Table3 根目录 stability_summary.png：3x3 网格 7 个子图，每个子图是
+    Δ=HCGN−Mosaic-Surv (Ours) 的着色表（行=4 个稳定性指标，列=5 数据集+Mean），
+    Δ>0 绿色、Δ<0 红色（RdYlGn 以 0 为中心），缺失单元格灰底 "-"。
+    """
+    main_display = MODEL_DISPLAY_NAMES[MAIN_MODEL]
+    hgcn_display = MODEL_DISPLAY_NAMES["hgcn"]
+    dataset_labels = [label for label, _, _ in STUDY_SPECS] + ["Mean"]
+    metric_labels = [STABILITY_METRIC_LABELS[metric] for metric in STABILITY_METRIC_NAMES]
+
+    delta_matrices: dict[str, np.ndarray] = {}
+    scale = 0.0
+    for subset in TEST_SUBSETS:
+        matrix = stability_delta_matrix(tables, subset, model_names, dataset_labels)
+        finite = matrix[np.isfinite(matrix)]
+        if finite.size:
+            scale = max(scale, float(np.max(np.abs(finite))))
+        delta_matrices[subset] = matrix
+    if scale <= 0.0:
+        print("[WARN] No stability deltas available; skip stability figure")
+        return figure_dir / "stability_summary.png"
+    scale = max(scale, 1e-6)
+
+    fig = plt.figure(figsize=(13.2, 9.0))
+    gs = fig.add_gridspec(
+        3,
+        3,
+        left=0.05,
+        right=0.88,
+        top=0.94,
+        bottom=0.05,
+        wspace=0.30,
+        hspace=0.32,
+    )
+    cmap = plt.get_cmap("RdYlGn")
+    last_im = None
+    for idx, subset in enumerate(TEST_SUBSETS):
+        row, col = divmod(idx, 3)
+        ax = fig.add_subplot(gs[row, col])
+        ax.set_facecolor("#d9d9d9")
+        matrix = delta_matrices[subset]
+        masked = np.ma.masked_invalid(matrix)
+        last_im = ax.imshow(
+            masked, cmap=cmap, vmin=-scale, vmax=scale, aspect="auto", interpolation="nearest"
+        )
+        for r in range(matrix.shape[0]):
+            for c in range(matrix.shape[1]):
+                value = matrix[r, c]
+                if not np.isfinite(value):
+                    ax.text(c, r, "-", ha="center", va="center", fontsize=8, color="0.3")
+                    continue
+                ax.text(
+                    c,
+                    r,
+                    f"{value:.4f}",
+                    ha="center",
+                    va="center",
+                    fontsize=7,
+                    color="black",
+                )
+        ax.set_xticks(range(len(dataset_labels)))
+        ax.set_xticklabels(dataset_labels, fontsize=7)
+        ax.set_yticks(range(len(metric_labels)))
+        ax.set_yticklabels(metric_labels, fontsize=8)
+        ax.set_title(f"Test subset {subset}", fontsize=11, pad=6)
+        for spine in ax.spines.values():
+            spine.set_visible(True)
+            spine.set_linewidth(0.8)
+            spine.set_color("0.25")
+        ax.tick_params(axis="x", length=0)
+        ax.tick_params(axis="y", length=0)
+        ax.set_axisbelow(True)
+
+    if last_im is not None:
+        cbar = fig.colorbar(
+            last_im,
+            ax=fig.axes,
+            shrink=0.85,
+            pad=0.02,
+        )
+        cbar.set_label(f"Δ={hgcn_display}-{main_display}", fontsize=10)
+        cbar.ax.tick_params(labelsize=8)
+
+    out_path = figure_dir / "stability_summary.png"
+    fig.savefig(out_path, dpi=300, facecolor="white", bbox_inches="tight")
+    plt.close(fig)
+    return out_path
+
+
 def main() -> None:
     project_root = project_root_from_script()
     parser = argparse.ArgumentParser(description="Collect Table 3 train-missing-rate c-index summaries")
@@ -654,6 +787,8 @@ def main() -> None:
         print(f"[WRITE] {subset_fig_path.relative_to(args.output_root)}")
     fig_path = write_combined_figure(tables, model_names, output_dir)
     print(f"[WRITE] {fig_path.relative_to(args.output_root)}")
+    stability_fig_path = write_stability_figure(tables, model_names, output_dir)
+    print(f"[WRITE] {stability_fig_path.relative_to(args.output_root)}")
     print("Done.")
 
 

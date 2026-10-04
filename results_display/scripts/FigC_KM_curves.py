@@ -65,26 +65,11 @@ STUDY_ALIASES = {
     **{study.replace("tcga_", "").lower(): (token, study) for token, study in STUDY_SPECS},
 }
 
-BASELINE_MODEL_SPECS = [
-    ("P", "abmil_wsi"),
-    ("P", "mlp_wsi"),
-    ("P", "transmil_wsi"),
-    ("C", "clinic_cox"),
-    ("C", "mlp_clinic_mean"),
-    ("C", "mlp_clinic_flatten"),
-    ("C", "snn_clinic_mean"),
-    ("C", "snn_clinic_flatten"),
-    ("G", "mlp_gene"),
-    ("G", "snn_gene"),
-    ("G", "mlp_gene_f"),
-    ("G", "snn_gene_f"),
-    ("P+C", "survpc_f"),
-    ("P+G", "porpoise"),
-    ("P+G", "survpath"),
-    ("P+G", "mcat"),
-    ("C+G", "survgc_f"),
-    ("P+C+G", "survpgc_f"),
-]
+# FigC 读的是 Table1 的实验结果文件，基线名单与 Table1 官方清单同源
+# （results_display/scripts/Table1_Cindex_Main.py 的 BASELINE_MODEL_SPECS，
+# 即 configs/z_exp_gen/Table1_cindex_main/gen_baselines/_common.bash 启用的 preset）。
+from Table1_Cindex_Main import BASELINE_MODEL_SPECS  # noqa: E402
+
 BASELINE_TYPE = {model: model_type for model_type, model in BASELINE_MODEL_SPECS}
 TYPE_ORDER = {"P": 0, "C": 1, "G": 2, "P+C": 3, "P+G": 4, "C+G": 5, "P+C+G": 6, "Ours": 7, "Other": 99}
 
