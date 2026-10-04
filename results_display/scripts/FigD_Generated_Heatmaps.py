@@ -29,7 +29,7 @@ Results go under results_display/FigD_Generated_Heatmaps/<dataset>/fold<k>/<poe_
     mosaic_surv_multi, mosaic_surv_twostage, mosaic_surv_frozen,
     mosaic_surv_kl, mosaic_surv_nojeffreys, mosaic_surv_detached
 主模型 checkpoint 来自 Table1_Cindex_Main/<test-dir>；变体来自
-Table4_Abaltion_Test/<study>__*__<variant-run-id>。
+Table4_Abaltion_Test/<study>__cell_norm__<wsi>（单组方案，无 run_id 后缀）。
 
 Example:
 conda activate SurvPGC
@@ -77,9 +77,8 @@ from wsi_core.wsi_utils import sample_rois
 GROUP_DIR = "Table1_Cindex_Main"
 TEST_DIR_TEMPLATE = "L0Test"
 # 变体模型（mosaic_surv_single / _multi / _twostage / ...）的 checkpoint 在
-# Table4 消融批次里，run_id 可选 t025_alpha_learn / t028_orig / t028_alpha_learn。
+# Table4 消融批次里（新单组方案：results/Table4_Abaltion_Test/{study}__cell_norm__uni_v1/）。
 VARIANT_GROUP_DIR = "Table4_Abaltion_Test"
-DEFAULT_VARIANT_RUN_ID = "t028_orig"
 OUTPUT_SERIES = "FigD_Generated_Heatmaps"
 OUTPUT_EXPERIMENT = "attention"
 ALLOWED_EVAL_SUBSETS = ("P", "PC", "PG", "C", "G")
@@ -128,12 +127,6 @@ def parse_args():
     parser.add_argument("--results-root", type=Path, default=PROJECT_ROOT / "results")
     parser.add_argument("--group-dir", type=str, default=GROUP_DIR)
     parser.add_argument("--test-dir", type=str, default=TEST_DIR_TEMPLATE)
-    parser.add_argument(
-        "--variant-run-id",
-        type=str,
-        default=DEFAULT_VARIANT_RUN_ID,
-        help="Table4 ablation run_id for variant models (t025_alpha_learn / t028_orig / t028_alpha_learn)",
-    )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--slide-root", type=str, default="")
     parser.add_argument("--patches-dir", type=str, default="")
@@ -240,11 +233,11 @@ def find_poe_ckpt(args, study, poe_model):
             / f"L0_{study_tag}_poe_model_val"
         )
     else:
-        # 变体模型 checkpoint 在 Table4 消融批次里
+        # 变体模型 checkpoint 在 Table4 消融批次里（单组方案，目录无 run_id 后缀）
         poe_root = (
             args.results_root
             / VARIANT_GROUP_DIR
-            / f"{study}__cell_norm__{args.wsi_experiment}__{args.variant_run_id}"
+            / f"{study}__cell_norm__{args.wsi_experiment}"
         )
     matches = sorted(poe_root.glob(f"**/{poe_model}/s_{args.fold}_checkpoint.pt"))
     matches = [p for p in matches if "stage1" not in p.name]
