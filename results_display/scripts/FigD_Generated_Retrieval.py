@@ -11,7 +11,7 @@ conda activate SurvPGC
 python results_display/scripts/FigD_Generated_Retrieval.py \
     --dataset LIHC \
     --fold 0 \
-    --poe-model survtri_poe_vae_c_film \
+    --poe-model mosaic_surv \
     --eval-subset P,PC,PG,C,G \
     --split test
 """
@@ -37,16 +37,23 @@ import torch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+_SCRIPT_DIR = str(Path(__file__).resolve().parent)
+for _dir in (_SCRIPT_DIR, str(PROJECT_ROOT)):
+    if _dir not in sys.path:
+        sys.path.insert(0, _dir)
 
 from dataset_deployment.registry import DATASET_CONFIGS, infer_standard_paths
 from dataset_deployment.workspace_features import resolve_case_feature_path
 from models.missing_modality_baselines.common import apply_eval_subset
+from model_names import MAIN_MODEL, canonical_model_key  # noqa: E402
 
 
 GROUP_DIR = "Table1_Cindex_Main"
-TEST_DIR_TEMPLATE = "L0Test After fixed modal missing"
+TEST_DIR_TEMPLATE = "L0Test"
+# 变体模型（mosaic_surv_single / _multi / _twostage / ...）的 checkpoint 在
+# Table4 消融批次里，run_id 可选 t025_alpha_learn / t028_orig / t028_alpha_learn。
+VARIANT_GROUP_DIR = "Table4_Abaltion_Test"
+DEFAULT_VARIANT_RUN_ID = "t028_orig"
 OUTPUT_SERIES = "FigD_Generated_Heatmaps"
 OUTPUT_EXPERIMENT = "retrieval"
 ALLOWED_EVAL_SUBSETS = ("P", "PC", "PG", "C", "G")
@@ -56,27 +63,6 @@ SUBSET_RETRIEVAL = {
     "PG": ("C",),
     "C": ("G",),
     "G": ("C",),
-}
-POE_MODEL_ALIASES = {
-    "b": "survtri_poe_vae",
-    "b_base": "survtri_poe_vae",
-    "survtri_poe_vae": "survtri_poe_vae",
-    "survtri_poe_vae_b": "survtri_poe_vae",
-    "b_single": "survtri_poe_vae_b_single",
-    "survtri_poe_vae_b_single": "survtri_poe_vae_b_single",
-    "b_multi": "survtri_poe_vae_b_multi",
-    "survtri_poe_vae_b_multi": "survtri_poe_vae_b_multi",
-    "b_film": "survtri_poe_vae_b_film",
-    "survtri_poe_vae_b_film": "survtri_poe_vae_b_film",
-    "c": "survtri_poe_vae_c",
-    "c_base": "survtri_poe_vae_c",
-    "survtri_poe_vae_c": "survtri_poe_vae_c",
-    "c_single": "survtri_poe_vae_c_single",
-    "survtri_poe_vae_c_single": "survtri_poe_vae_c_single",
-    "c_multi": "survtri_poe_vae_c_multi",
-    "survtri_poe_vae_c_multi": "survtri_poe_vae_c_multi",
-    "c_film": "survtri_poe_vae_c_film",
-    "survtri_poe_vae_c_film": "survtri_poe_vae_c_film",
 }
 STUDY_SPECS = {
     "BRCA": "tcga_brca",
@@ -97,7 +83,7 @@ def parse_args():
     parser.add_argument("--dataset", type=str, default="LIHC")
     parser.add_argument("--study", type=str, default="")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--poe-model", type=str, default="survtri_poe_vae_b_single")
+    parser.add_argument("--poe-model", type=str, default="mosaic_surv_single")
     parser.add_argument(
         "--eval-subset",
         type=str,
@@ -115,6 +101,12 @@ def parse_args():
     parser.add_argument("--results-root", type=Path, default=PROJECT_ROOT / "results")
     parser.add_argument("--group-dir", type=str, default=GROUP_DIR)
     parser.add_argument("--test-dir", type=str, default=TEST_DIR_TEMPLATE)
+    parser.add_argument(
+        "--variant-run-id",
+        type=str,
+        default=DEFAULT_VARIANT_RUN_ID,
+        help="Table4 ablation run_id for variant models (t025_alpha_learn / t028_orig / t028_alpha_learn)",
+    )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--poe-ckpt", type=str, default="")
     parser.add_argument("--device", type=str, default="")
@@ -152,8 +144,8 @@ def resolve_study(args):
 
 
 def normalize_poe_model(name):
-    raw = str(name).strip().lower()
-    return POE_MODEL_ALIASES.get(raw, raw)
+    """旧拼写/正式名 → 注册键（model_names.py 集中映射）；映射外小写原样。"""
+    return canonical_model_key(name)
 
 
 def choose_device(requested):
@@ -178,8 +170,21 @@ def find_poe_ckpt(args, study, poe_model):
             raise FileNotFoundError(path)
         return path
     study_tag = study.replace("tcga_", "").upper()
-    root = args.results_root / args.group_dir / args.test_dir
-    poe_root = root / f"L0_{study_tag}_poe_model_val"
+    if poe_model == MAIN_MODEL:
+        # 主模型 checkpoint 在 Table1 本批次的 ours 树里
+        poe_root = (
+            args.results_root
+            / args.group_dir
+            / args.test_dir
+            / f"L0_{study_tag}_poe_model_val"
+        )
+    else:
+        # 变体模型 checkpoint 在 Table4 消融批次里
+        poe_root = (
+            args.results_root
+            / VARIANT_GROUP_DIR
+            / f"{study}__cell_norm__{args.wsi_experiment}__{args.variant_run_id}"
+        )
     matches = sorted(poe_root.glob(f"**/{poe_model}/s_{args.fold}_checkpoint.pt"))
     matches = [p for p in matches if "stage1" not in p.name]
     if not matches:

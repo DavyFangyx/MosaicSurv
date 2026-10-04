@@ -5,13 +5,13 @@
 
 Example:
 python results_display/scripts/FigC_KM_curves.py \
-    --test-dir "L0Test After fixed modal missing" \
+    --test-dir L0Test \
     --dataset BRCA \
     --time-unit month \
     --annotate-hr
 
 python results_display/scripts/FigC_KM_curves.py \
-    --test-dir "L0Test After fixed modal missing" \
+    --test-dir L0Test \
     --dataset all \
     --time-unit year \
     --annotate-hr
@@ -45,16 +45,7 @@ OUTPUT_SERIES = "FigC_KM_curves"
 LAYER_PREFIX_RE = re.compile(r"^(L\d+)")
 OURS_MODEL_TOKEN_RE = re.compile(r"survtri_poe_vae(?:__|_)([A-Za-z][A-Za-z0-9_]*)", re.IGNORECASE)
 MOSAIC_MODEL_PREFIX = "mosaic_surv"
-# 遗留区 results/Cfilm_Hparam_Eval/ 未改名，主模型目录仍是旧拼写
-LEGACY_MAIN_MODEL_DIR = "survtri_poe_vae_c_film"
 STUDY_FOLDER_RE = re.compile(r"^(L\d+)_([A-Za-z0-9]+)_(full_model_val|poe_model_val)$")
-
-# 【遗留别名】主模型（Mosaic-Surv，原 Cfilm / survtri_poe_vae_c_film）的 OOF 预测
-# 统一使用 hparam 扫描选出的参数点（t018_alpha_beta_learn）。该 hparam 扫描在遗留区
-# results/Cfilm_Hparam_Eval/ 下，目录名保持 Cfilm 时代的旧拼写、未随本次改名变动，
-# 因此这里的常量名与目录拼写都保留 CFILM_/旧键。
-CFILM_HPARAM_RUN_ID = "t018_alpha_beta_learn"
-CFILM_HPARAM_ROOT = PROJECT_ROOT / "results" / "Cfilm_Hparam_Eval" / "Table1" / CFILM_HPARAM_RUN_ID
 
 STUDY_SPECS = [
     ("BRCA", "tcga_brca"),
@@ -791,33 +782,6 @@ def write_experiment_matrix(test_dir: str, output_root: Path, study_tokens: list
     print(f"[OK] experiment matrix: {out_path}")
 
 
-def remap_cfilm_hparam(runs: list[ModelRun], study_token: str) -> None:
-    """主模型（Mosaic-Surv，原 Cfilm）的预测目录替换为 hparam 参数点
-    t018_alpha_beta_learn 的结果目录。
-
-    【遗留别名】该参数点目录在遗留区 results/Cfilm_Hparam_Eval/ 下，模型目录名
-    仍是旧拼写 `survtri_poe_vae_c_film`（遗留区未改名），故此处按旧拼写查找；
-    找不到对应文件夹时保留原目录并警告（例如 hparam 扫描未覆盖的数据集）。
-    """
-    study = STUDY_TOKEN_TO_NAME.get(study_token)
-    if study is None:
-        return
-    for run in runs:
-        if not is_main_model(run.model):
-            continue
-        candidates = [
-            child / LEGACY_MAIN_MODEL_DIR
-            for child in sorted(CFILM_HPARAM_ROOT.glob(f"{study}__*"))
-        ]
-        model_dir = next((c for c in candidates if c.is_dir()), None)
-        if model_dir is None:
-            print(f"[WARN] {CFILM_HPARAM_RUN_ID} main model missing for {study_token}; keep original {run.model_dir}")
-            continue
-        run.model_dir = model_dir
-        run.csv_path = model_dir / "test_result.csv"
-        print(f"[OVERRIDE] {run.model} -> {CFILM_HPARAM_RUN_ID}: {model_dir}")
-
-
 def collect_runs(experiment_dir: Path, layer_dir: str, study_token: str) -> list[ModelRun]:
     runs: list[ModelRun] = []
     mapping = [
@@ -832,7 +796,6 @@ def collect_runs(experiment_dir: Path, layer_dir: str, study_token: str) -> list
         found = discover_models(study_dir, kind)
         print(f"[KIND] {kind} | {folder_name} | models={len(found)}")
         runs.extend(found)
-    remap_cfilm_hparam(runs, study_token)
     runs.sort(key=lambda item: model_sort_key(item.model_type, item.model))
     return runs
 

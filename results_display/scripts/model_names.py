@@ -49,9 +49,13 @@ LEGACY_ALIASES: dict[str, str] = {
     "c_film_beta0": "mosaic_surv_nojeffreys",
     "survtri_poe_vae_c_film_surv0": "mosaic_surv_detached",
     "c_film_surv0": "mosaic_surv_detached",
-    # 早期批次的双下划线拼写（目录仍在 Table4 树里，未改名）
-    "survtri_poe_vae_c_film__beta0": "mosaic_surv_nojeffreys",
-    "survtri_poe_vae_c_film__surv0": "mosaic_surv_detached",
+    # B 系单/多头与 KL 变体（Table4 消融已重跑为新键；旧拼写历史目录/文档里仍会出现）
+    "survtri_poe_vae_b_single": "mosaic_surv_single",
+    "b_single": "mosaic_surv_single",
+    "survtri_poe_vae_b_multi": "mosaic_surv_multi",
+    "b_multi": "mosaic_surv_multi",
+    "survtri_poe_vae_b_kl": "mosaic_surv_kl",
+    "b_kl": "mosaic_surv_kl",
 }
 
 

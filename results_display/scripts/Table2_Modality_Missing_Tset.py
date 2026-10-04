@@ -8,8 +8,9 @@ Default outputs:
     results_display/Table2_Modality_Missing_Tset/{study}_model_summary.csv
     results_display/Table2_Modality_Missing_Tset/summary.csv
 
-Models are discovered by scanning each study directory under
-results/Table2_Baselines/, rather than a hardcoded model list.
+Models default to the official whitelist (OFFICIAL_MODELS below, same set as
+configs/z_exp_gen/gen_Table2_missing_modality_baselines.sh PRESETS).
+--scan-all restores the old scan-everything behavior.
 
 The summary table is transposed relative to the per-study tables: columns
 are studies, and rows are the six missing-type scenarios (C, P, G, PC, CG,
@@ -34,7 +35,7 @@ from model_names import display_name
 
 GROUP_DIR = "Table2_Baselines"
 DISPLAY_DIR = "Table2_Modality_Missing_Tset"
-DEFAULT_RUN_SUFFIX = "L4__gene_raw__uni_v1"
+DEFAULT_RUN_SUFFIX = "L0__gene_raw__uni_v1"
 
 STUDY_SPECS = [
     ("BRCA", "tcga_brca"),
@@ -44,16 +45,18 @@ STUDY_SPECS = [
     ("LIHC", "tcga_lihc"),
 ]
 
-# Preferred listing order when these directories exist. Any other scanned
-# model directories are appended alphabetically.
-PREFERRED_MODEL_ORDER = [
-    "survtri_poe_vae__B",
+# 官方 Table2 模型清单（见 configs/z_exp_gen/gen_Table2_missing_modality_baselines.sh
+# 的 PRESETS；POE 家族除主模型外全部降级到 Table4 消融）。--scan-all 时任何其他
+# 扫描到的模型目录按字母序追加在后面。
+OFFICIAL_MODELS = [
+    "mosaic_surv",
     "modality_concat__resampler__zero",
     "modality_concat__resampler__mean",
     "mvae_poe",
     "mopoe",
     "hgcn",
 ]
+PREFERRED_MODEL_ORDER = OFFICIAL_MODELS
 
 PREFERRED_MODEL_RANK = {name: index for index, name in enumerate(PREFERRED_MODEL_ORDER)}
 
@@ -323,17 +326,33 @@ def main() -> None:
     parser.add_argument(
         "--run-suffix",
         default=DEFAULT_RUN_SUFFIX,
-        help="Official Table2 run-name suffix after study, e.g. L4__gene_raw__uni_v1",
+        help="Official Table2 run-name suffix after study, e.g. L0__gene_raw__uni_v1",
+    )
+    parser.add_argument(
+        "--model-name",
+        action="append",
+        default=None,
+        help="Model directory name to collect. Repeat to keep a subset; default is the official whitelist.",
+    )
+    parser.add_argument(
+        "--scan-all",
+        action="store_true",
+        help="Restore old scan-all behavior (discover every model directory on disk).",
     )
     args = parser.parse_args()
 
     studies = [study for _, study in STUDY_SPECS]
-    model_dir_names = discover_model_dir_names(
-        args.results_root,
-        group_dir=args.group_dir,
-        studies=studies,
-        run_suffix=args.run_suffix,
-    )
+    if args.scan_all:
+        model_dir_names = discover_model_dir_names(
+            args.results_root,
+            group_dir=args.group_dir,
+            studies=studies,
+            run_suffix=args.run_suffix,
+        )
+    elif args.model_name:
+        model_dir_names = sorted(set(args.model_name), key=model_sort_key)
+    else:
+        model_dir_names = list(OFFICIAL_MODELS)
     if not model_dir_names:
         print(
             f"[WARN] No model directories found under "

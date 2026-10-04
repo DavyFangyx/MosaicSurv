@@ -1,8 +1,8 @@
 """
 Table1 统一生成入口：运行一次，产出全部 Table1 展示文件。
 
-Pipeline（对每个实验目录 results/Table1_Cindex_Main/<test-dir>/，
-默认扫描全部；--test-dir 指定单个）：
+Pipeline（实验目录 results/Table1_Cindex_Main/<test-dir>/，
+默认 L0Test；--test-dir 指定其他批次目录）：
 
   1. Cox Breslow 前向缓存：为本目录的 cox 类模型（clinic_cox 基线 +
      mosaic_surv 主模型，以及走第三方训练器的 hgcn——Table1_HGCN_Forward）
@@ -13,8 +13,7 @@ Pipeline（对每个实验目录 results/Table1_Cindex_Main/<test-dir>/，
 
   2. 论文五表（Table1a_Cindex_Matrix / Table1b_MultiMetric_Summary /
      AppendixS1_IBS_Matrix / AppendixS2_AUC2y_Matrix / AppendixS3_AUC5y_Matrix）：
-     官方口径，5 cohort；Ours 行与本目录树内的官方 mosaic_surv 结果同源
-     （旧批次目录目录树内无官方 Ours 时回退遗留 Cfilm hparam-eval 区）。
+     官方口径，5 cohort；Ours 行与本目录树内的官方 mosaic_surv 结果同源。
      hgcn 的 IBS/AUC 单元格由第 1 步的前向缓存补齐（其 runner 不落盘
      标准 split_N_results.pkl，离线 nll 链路读不到，故走 Breslow 前向）。
 
@@ -23,10 +22,11 @@ Pipeline（对每个实验目录 results/Table1_Cindex_Main/<test-dir>/，
      供 FigC/FigD 与 hparam-eval 显示沿用。
 
 用法（项目根目录，SurvPGC conda env）：
-  python results_display/scripts/Table1_Generate_All.py                # 全部实验目录
+  python results_display/scripts/Table1_Generate_All.py                # 默认 --test-dir L0Test
   python results_display/scripts/Table1_Generate_All.py --test-dir L0Test
   python results_display/scripts/Table1_Generate_All.py --test-dir L0Test --skip-cox
   python results_display/scripts/Table1_Generate_All.py --test-dir L0Test --gpu 4
+  旧批次目录（L0Test_BeforeTune 等）如需重算，显式 --test-dir 指定即可。
 """
 
 from __future__ import annotations
@@ -47,7 +47,6 @@ from Table1_Cindex_Main import (  # noqa: E402
     STUDY_SPECS,
     collect_experiment as collect_summary_family,
     infer_layer_dir,
-    list_experiment_dirs,
     project_root_from_script,
     resolve_group_study_dir,
 )
@@ -62,10 +61,8 @@ COX_BASELINE_MODEL_DIRS = ("clinic_cox",)
 OURS_MODEL_DIRS = ("mosaic_surv",)
 HGCN_MODEL_DIRS = ("hgcn",)
 ALL_FOLDS = (0, 1, 2, 3, 4)
-DEFAULT_LEGACY_COX_DIRS = (
-    "L0Test_BeforeTune,L0Test After Fix some err,L0Test After fixed modal missing"
-)
-DEFAULT_LEGACY_OURS_DIRS = "L0Test After fixed modal missing"
+# 旧批次目录已不参与默认口径；如需对旧批次目录重算，请显式 --test-dir 指定。
+DEFAULT_LEGACY_COX_DIRS = ""
 
 
 def cox_cache_path(project_root: Path, test_dir: str) -> Path:
@@ -201,10 +198,7 @@ def run_experiment(args: argparse.Namespace, project_root: Path, test_dir: str) 
             folds=folds,
         )
 
-    # ---- 2. 论文五表（官方口径）
-    ours_results_root = (
-        args.ours_results_root if test_dir in args.ours_for_dirs else None
-    )
+    # ---- 2. 论文五表（官方口径；Ours 来自本目录树内同批次的 mosaic_surv）
     build_tables(
         results_root,
         output_root,
@@ -212,8 +206,6 @@ def run_experiment(args: argparse.Namespace, project_root: Path, test_dir: str) 
         group_dir=group_dir,
         test_dir=test_dir,
         layer_dir=layer_dir,
-        ours_results_root=ours_results_root,
-        ours_group_dir=args.ours_group_dir,
         with_cox_cache=True,
         cox_cache_csv=cox_cache_path(project_root, test_dir),
         cox_shared_fallback=test_dir in args.cox_cache_dirs,
@@ -251,8 +243,8 @@ def main() -> None:
     parser.add_argument("--layer-dir", default=None)
     parser.add_argument(
         "--test-dir",
-        default=None,
-        help="Experiment folder under the grouped results directory; scans all by default",
+        default="L0Test",
+        help="Experiment folder under the grouped results directory; default L0Test",
     )
     parser.add_argument(
         "--gpu",
@@ -267,42 +259,20 @@ def main() -> None:
         help="Skip the cox Breslow forward pass (Ours IBS/AUC cells show '-')",
     )
     parser.add_argument(
-        "--ours-results-root",
-        type=Path,
-        default=project_root / "results" / "Cfilm_Hparam_Eval",
-        help="Legacy results root for the main model (only for dirs without in-tree Ours)",
-    )
-    parser.add_argument("--ours-group-dir", default="Table1_Cindex")
-    parser.add_argument(
-        "--with-ours-test-dirs",
-        default=DEFAULT_LEGACY_OURS_DIRS,
-        help="Dirs that fall back to the legacy Ours zone (no in-tree mosaic_surv)",
-    )
-    parser.add_argument(
         "--cox-cache-dirs",
         default=DEFAULT_LEGACY_COX_DIRS,
-        help="Dirs whose clinic_cox runs match the legacy shared Breslow cache",
+        help=(
+            "Dirs whose clinic_cox runs may fall back to the legacy shared "
+            "Breslow cache (default none; 新批次用专属缓存)"
+        ),
     )
     args = parser.parse_args()
 
-    args.ours_for_dirs = {
-        part.strip() for part in args.with_ours_test_dirs.split(",") if part.strip()
-    }
     args.cox_cache_dirs = {
         part.strip() for part in args.cox_cache_dirs.split(",") if part.strip()
     }
 
-    if args.test_dir is not None:
-        run_experiment(args, project_root, args.test_dir)
-        print("Done.")
-        return
-
-    experiment_dirs = list_experiment_dirs(args.results_root, args.group_dir)
-    if not experiment_dirs:
-        print(f"[WARN] No experiment folders found under {args.results_root / args.group_dir}")
-        return
-    for experiment_dir in experiment_dirs:
-        run_experiment(args, project_root, experiment_dir.name)
+    run_experiment(args, project_root, args.test_dir)
     print("Done.")
 
 

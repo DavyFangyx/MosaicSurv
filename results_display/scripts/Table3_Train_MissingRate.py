@@ -67,17 +67,21 @@ PATTERN_LABELS = {
 }
 # 官方 Table3 模型清单：Mosaic-Surv、hgcn、modality_concat mean
 # （见 configs/z_exp_gen/gen_Table3_missing_rate_test.sh 的 PRESETS）。
-PREFERRED_MODEL_ORDER = [
+OFFICIAL_MODELS = [
     MAIN_MODEL,
     "hgcn",
+    "modality_concat__resampler__mean",
 ]
+PREFERRED_MODEL_ORDER = OFFICIAL_MODELS
 MODEL_DISPLAY_NAMES = {
     MAIN_MODEL: FORMAL_NAMES[MAIN_MODEL],
     "hgcn": "HCGN",
+    "modality_concat__resampler__mean": "modality_concat_mean",
 }
 MODEL_STYLES = {
     MAIN_MODEL: ("o", "-"),
     "hgcn": ("^", "--"),
+    "modality_concat__resampler__mean": ("s", "-."),
 }
 EXTRA_MODEL_MARKERS = ["s", "D", "v", "P", "X"]
 EXTRA_MODEL_LINESTYLES = ["-.", ":", (0, (5, 1, 1, 1)), (0, (3, 1, 1, 1, 1, 1))]
@@ -600,14 +604,27 @@ def main() -> None:
         "--model-name",
         action="append",
         default=None,
-        help="Model directory name to collect. Repeat to keep a subset; default discovers all.",
+        help=(
+            "Model directory name to collect. Repeat to keep a subset; "
+            "default is the official set {mosaic_surv, hgcn, modality_concat__resampler__mean}."
+        ),
+    )
+    parser.add_argument(
+        "--scan-all",
+        action="store_true",
+        help="Restore old scan-all behavior (discover every model directory on disk).",
     )
     args = parser.parse_args()
+
+    if args.scan_all:
+        model_names_filter = None
+    else:
+        model_names_filter = args.model_name or list(OFFICIAL_MODELS)
 
     tables = collect_group(
         args.results_root,
         group_dir=args.group_dir,
-        model_names=args.model_name,
+        model_names=model_names_filter,
     )
     model_names = ordered_models(tables)
 
