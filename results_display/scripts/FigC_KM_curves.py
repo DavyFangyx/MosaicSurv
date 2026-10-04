@@ -172,6 +172,11 @@ def ordered_available_study_tokens(experiment_dir: Path) -> list[str]:
     return known + extras
 
 
+# 官方口径 5 cohort（与 Table1 论文表 COHORT_DISPLAY 一致）；
+# KICH/PRAD/READ 等扩展数据集不在默认出图范围，可显式 --dataset 指定。
+OFFICIAL_FIGC_STUDY_TOKENS = ["BRCA", "COAD", "KIRC", "KIRP", "LIHC"]
+
+
 def resolve_requested_study_tokens(dataset: str, experiment_dir: Path) -> list[str]:
     available_tokens = ordered_available_study_tokens(experiment_dir)
     if not available_tokens:
@@ -179,7 +184,7 @@ def resolve_requested_study_tokens(dataset: str, experiment_dir: Path) -> list[s
 
     key = str(dataset).strip().lower()
     if key in {"all", "*"}:
-        return available_tokens
+        return [token for token in available_tokens if token in OFFICIAL_FIGC_STUDY_TOKENS]
 
     study_token, _ = resolve_study_spec(dataset)
     if study_token not in available_tokens:

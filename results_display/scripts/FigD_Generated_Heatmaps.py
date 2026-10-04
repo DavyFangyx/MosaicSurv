@@ -112,7 +112,7 @@ def parse_args():
     parser.add_argument("--dataset", type=str, default="LIHC")
     parser.add_argument("--study", type=str, default="")
     parser.add_argument("--fold", type=int, default=0)
-    parser.add_argument("--poe-model", type=str, default="mosaic_surv_single")
+    parser.add_argument("--poe-model", type=str, default="mosaic_surv")
     parser.add_argument(
         "--eval-subset",
         type=str,
