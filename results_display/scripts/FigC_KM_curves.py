@@ -273,7 +273,7 @@ def load_oof_predictions(model_dir: Path) -> pd.DataFrame | None:
                 }
             )
     if not found:
-        return None
+        return load_hgcn_oof_predictions(model_dir)
     if not rows:
         return pd.DataFrame(columns=["case_id", "fold", "time", "risk", "censorship", "event"])
     df = pd.DataFrame(rows)
@@ -281,6 +281,73 @@ def load_oof_predictions(model_dir: Path) -> pd.DataFrame | None:
     if dup_mask.any():
         print(f"[WARN] Dropping {int(dup_mask.sum())} duplicated case_ids under {model_dir}")
         df = df.loc[~dup_mask].copy()
+    df["event"] = (1.0 - df["censorship"]).astype(int)
+    return df
+
+
+def load_hgcn_oof_predictions(model_dir: Path) -> pd.DataFrame | None:
+    """hgcn 训练器不落盘标准 split_N_results.pkl：测试集 risk 存在
+    all_gnn_time.pkl，time/censorship 从 hgcn 图 pack 重建，fold 划分用
+    splits csv（复用 Table1_HGCN_Forward 的加载函数，无 GPU 需求）。"""
+    import joblib
+
+    from Table1_HGCN_Forward import (
+        _load_effective_config,
+        _load_graphs,
+        load_hgcn_modules,
+    )
+
+    if not (model_dir / "all_gnn_time.pkl").is_file():
+        return None
+    if not (model_dir / "effective_config.txt").is_file():
+        return None
+
+    train, build = load_hgcn_modules()
+    config = _load_effective_config(model_dir)
+    study = config.get("STUDY", "unknown")
+    patients_raw, sur_and_time, all_data = _load_graphs(train, build, config, PROJECT_ROOT)
+    patients = [str(pid) for pid in patients_raw if str(pid) in all_data]
+    if not patients:
+        print(f"[WARN] hgcn pack has no assembled graphs for {study}")
+        return None
+    patient_sur_type, patient_and_time, _ = train.get_patients_information(
+        patients, sur_and_time
+    )
+    gnn_seeds = joblib.load(model_dir / "all_gnn_time.pkl")
+    if not gnn_seeds:
+        return None
+    seed_gnn = gnn_seeds[0]
+    split_dir = config.get("SPLIT_DIR") or str(
+        PROJECT_ROOT / "splits" / "5foldcv" / study
+    )
+
+    rows: list[dict[str, object]] = []
+    found = False
+    for fold in range(5):
+        split_csv_path = Path(split_dir) / f"splits_{fold}.csv"
+        if not split_csv_path.is_file():
+            continue
+        _, _, test_split = train._load_split_csv(split_csv_path)
+        test_ids = train._intersect_split_ids(test_split, patients, "test", split_csv_path)
+        test_ids = [pid for pid in test_ids if pid in seed_gnn]
+        if not test_ids:
+            continue
+        found = True
+        for pid in test_ids:
+            rows.append(
+                {
+                    "case_id": str(pid),
+                    "fold": fold,
+                    "time": float(np.asarray(patient_and_time[pid]).reshape(-1)[0]),
+                    "risk": float(np.asarray(seed_gnn[pid]).reshape(-1)[0]),
+                    "censorship": 1.0
+                    - float(np.asarray(patient_sur_type[pid]).reshape(-1)[0]),
+                }
+            )
+    if not found:
+        print(f"[WARN] hgcn all_gnn_time.pkl has no per-fold test predictions for {study}")
+        return None
+    df = pd.DataFrame(rows)
     df["event"] = (1.0 - df["censorship"]).astype(int)
     return df
 
