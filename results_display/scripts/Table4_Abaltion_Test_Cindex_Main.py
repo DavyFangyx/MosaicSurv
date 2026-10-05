@@ -1,5 +1,5 @@
 """
-Collect Table 4 ablation c-index comparison tables.
+Collect Table 4（_Cindex_Main 子实验）ablation c-index comparison tables.
 
 The three ablation tests are defined in z_temp/Table4/ablation_checklist.md:
 
@@ -8,26 +8,30 @@ The three ablation tests are defined in z_temp/Table4/ablation_checklist.md:
                 mosaic_surv_multi)
     B_training  training paradigm (mosaic_surv_twostage, mosaic_surv_frozen)
     C_loss      joint-loss terms (mosaic_surv_kl, mosaic_surv_nojeffreys,
-                mosaic_surv_detached; 原 c_film_kl / c_film_beta0 / c_film_surv0)
+                mosaic_surv_detached)
 
 Every test is compared against the main model `mosaic_surv` (first row of
-each table). The whole ablation batch uses the single unified MosaicSurv
+each table). The whole batch uses the single unified MosaicSurv
 hyperparameters from configs/z_exp_gen/mosaic_hparams.sh（由
-configs/z_exp_gen/gen_Table4_Abaltion_Test.sh 生成，结果目录不带 run_id 后缀）。
+configs/z_exp_gen/gen_Table4_Abaltion_Test_Cindex_Main.sh 生成，结果目录
+不带 run_id 后缀）。A/B/C 三组消融都进行。
 
 Default input:
-    results/Table4_Abaltion_Test/{study}__* /{model}/test_result.csv
+    results/Table4_Abaltion_Test/_Cindex_Main/{study}__* /{model}/test_result.csv
     （每个 study 一个运行目录，如 tcga_brca__cell_norm__uni_v1）
 
 Default outputs:
-    results_display/Table4_Abaltion_Test/summary_A_readout_5datasets.csv
-    results_display/Table4_Abaltion_Test/summary_B_training_5datasets.csv
-    results_display/Table4_Abaltion_Test/summary_C_loss_5datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_A_readout_5datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_B_training_5datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_C_loss_5datasets.csv
 
 Every table keeps the classic summary_5datasets.csv row/column layout:
 rows are models, columns are the five datasets plus a mean column. Missing
 experiments are written as `-`, so the script can be re-run while training
 results are still arriving.
+
+兄弟实验（_Modality_Missing 子实验，仅 A 组、Table2 式缺失模态评测）见
+Table4_Abaltion_Test_Modality_Missing.py。
 """
 
 from __future__ import annotations
@@ -43,7 +47,7 @@ import pandas as pd
 from model_names import display_name
 
 
-GROUP_DIR = "Table4_Abaltion_Test"
+GROUP_DIR = "Table4_Abaltion_Test/_Cindex_Main"
 
 MAIN_MODEL = "mosaic_surv"
 
@@ -210,17 +214,19 @@ def write_table(frame: pd.DataFrame, out_dir: Path, group_key: str) -> None:
 
 
 def clean_legacy_outputs(out_root: Path) -> None:
-    """Remove legacy display outputs: the old flat files (summary.csv /
-    summary_5datasets.csv / summary/) and the per-run_id folders of the
-    superseded three-batch layout (t025_alpha_learn / t028_orig /
-    t028_alpha_learn). Only called when --clean-legacy is passed explicitly."""
+    """Remove legacy display outputs at the pre-reorganization locations:
+    the flat files and per-run_id folders under the old
+    results_display/Table4_Abaltion_Test/ root (superseded by the
+    _Cindex_Main / _Modality_Missing sub-experiment layout).
+    Only called when --clean-legacy is passed explicitly."""
+    old_root = out_root.parent
     for name in ("summary.csv", "summary_5datasets.csv"):
-        path = out_root / name
+        path = old_root / name
         if path.exists():
             path.unlink()
             print(f"[CLEAN] {path.relative_to(project_root_from_script())}")
     for name in ("summary", "t025_alpha_learn", "t028_orig", "t028_alpha_learn"):
-        legacy_dir = out_root / name
+        legacy_dir = old_root / name
         if legacy_dir.is_dir():
             shutil.rmtree(legacy_dir)
             print(f"[CLEAN] {legacy_dir.relative_to(project_root_from_script())}")

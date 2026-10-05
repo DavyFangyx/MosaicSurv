@@ -53,8 +53,8 @@ from model_names import MAIN_MODEL, canonical_model_key  # noqa: E402
 GROUP_DIR = "Table1_Cindex_Main"
 TEST_DIR_TEMPLATE = "L0Test"
 # 变体模型（mosaic_surv_single / _multi / _twostage / ...）的 checkpoint 在
-# Table4 消融批次里（新单组方案：results/Table4_Abaltion_Test/{study}__cell_norm__uni_v1/）。
-VARIANT_GROUP_DIR = "Table4_Abaltion_Test"
+# Table4 消融批次（_Cindex_Main 子实验：results/Table4_Abaltion_Test/_Cindex_Main/{study}__cell_norm__uni_v1/）。
+VARIANT_GROUP_DIR = "Table4_Abaltion_Test/_Cindex_Main"
 OUTPUT_SERIES = "FigD_Generated_Heatmaps"
 OUTPUT_EXPERIMENT = "embedding"
 ALLOWED_EVAL_SUBSETS = ("P", "PC", "PG", "C", "G")
