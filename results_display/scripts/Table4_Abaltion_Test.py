@@ -46,7 +46,6 @@ from model_names import display_name
 GROUP_DIR = "Table4_Abaltion_Test"
 
 MAIN_MODEL = "mosaic_surv"
-MAIN_MODEL_TYPE = "Main"
 
 GROUP_SPECS = {
     "A_readout": [
@@ -187,12 +186,10 @@ def build_table_frame(
     study_to_model_text: dict[str, dict[str, str]],
     group_key: str,
 ) -> pd.DataFrame:
-    specs = [(MAIN_MODEL_TYPE, MAIN_MODEL)] + [
-        (group_key, model) for model in GROUP_SPECS[group_key]
-    ]
+    specs = [MAIN_MODEL] + [model for model in GROUP_SPECS[group_key]]
     rows: list[dict[str, object]] = []
-    for model_type, model in specs:
-        row: dict[str, object] = {"model_type": model_type, "model": MODEL_LABELS.get(model, model)}
+    for model in specs:
+        row: dict[str, object] = {"model": MODEL_LABELS.get(model, model)}
         values: list[float] = []
         for study in STUDIES:
             text = study_to_model_text.get(study, {}).get(model, "-")
@@ -202,7 +199,7 @@ def build_table_frame(
                 values.append(parsed)
         row["mean"] = format_mean(sum(values) / len(values) if values else None)
         rows.append(row)
-    return pd.DataFrame(rows, columns=["model_type", "model", *STUDIES, "mean"])
+    return pd.DataFrame(rows, columns=["model", *STUDIES, "mean"])
 
 
 def write_table(frame: pd.DataFrame, out_dir: Path, group_key: str) -> None:
