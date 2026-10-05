@@ -8,8 +8,8 @@ Default outputs:
     results_display/Table2_Modality_Missing_Tset/{study}_model_summary.csv
     results_display/Table2_Modality_Missing_Tset/summary.csv
     results_display/Table2_Modality_Missing_Tset/baseline_ranking.png
-        （每个测试子集一个 panel：官方模型按固定顺序的 C-index 竖条 +
-        误差线 + 排名数字；主模型第一红框、胜过 hgcn 蓝框）
+        （5 行数据集 × 8 列（7 测试子集 + MEAN），每格为该 (dataset, subset)
+        下官方模型的 C-index 竖条 + 排名数字；主模型第一红框、胜 hgcn 蓝框）
 
 Models default to the official whitelist (OFFICIAL_MODELS below, same set as
 configs/z_exp_gen/gen_Table2_missing_modality_baselines.sh PRESETS).
@@ -336,90 +336,96 @@ def parse_mean_std_from_text(value: str) -> tuple[float, float] | None:
         return None
 
 
-def write_ranking_figure(summary_df: pd.DataFrame, output_root: Path) -> Path:
-    """baseline_ranking.png：summary.csv 的图示版。
-
-    每个测试子集一个 panel，模型按官方顺序固定排列（竖条 = 5 数据集
-    mean±std 均值），条顶标注排名；主模型第一时红框、胜过 hgcn 时蓝框。
+def write_ranking_figure(study_dfs: dict[str, pd.DataFrame], output_root: Path) -> Path:
+    """baseline_ranking.png：沿用 Cfilm hparam-eval 时代的构图逻辑——
+    5 行数据集 × 8 列（7 个测试子集 + MEAN），每个面板是该 (dataset, subset)
+    下官方模型的 C-index 竖条（固定顺序）+ 排名数字；主模型第一红框、
+    胜过 hgcn 蓝框。
     """
-    studies = [study for _, study in STUDY_SPECS]
     models = [model_label(name) for name in OFFICIAL_MODELS]
+    figure_subsets = [*SUBSETS, "MEAN"]
+    fig, axes = plt.subplots(
+        5, 8, figsize=(21, 13), sharey=True, constrained_layout=True
+    )
+    for i, (_, study) in enumerate(STUDY_SPECS):
+        frame = study_dfs[study]
+        study_rows = {str(row["model"]): row for _, row in frame.iterrows()}
+        for j, subset in enumerate(figure_subsets):
+            ax = axes[i, j]
+            if subset == "MEAN":
+                mean_values = {}
+                for model in models:
+                    stats_list = [
+                        parse_mean_std_from_text(study_rows.get(model, {}).get(s, "-"))
+                        for s in SUBSETS
+                    ]
+                    stats_list = [stats for stats in stats_list if stats is not None]
+                    if stats_list:
+                        mean_values[model] = (
+                            sum(mean for mean, _ in stats_list) / len(stats_list),
+                            sum(std for _, std in stats_list) / len(stats_list),
+                        )
+                panel_values = mean_values
+            else:
+                panel_values = {}
+                for model in models:
+                    parsed = parse_mean_std_from_text(
+                        study_rows.get(model, {}).get(subset, "-")
+                    )
+                    if parsed is not None:
+                        panel_values[model] = parsed
+            available = [
+                (model, stats)
+                for model, stats in panel_values.items()
+                if stats is not None
+            ]
+            ranked = sorted(available, key=lambda item: (-item[1][0], item[0]))
+            ranks = {model: rank for rank, (model, _) in enumerate(ranked, start=1)}
 
-    cell_stats: dict[tuple[str, str], list[tuple[float, float]]] = {}
-    for subset in SUMMARY_SUBSETS:
-        for model in models:
-            pairs = []
-            for study in studies:
-                cell = summary_df.loc[(subset, model), study]
-                parsed = parse_mean_std_from_text(cell)
-                if parsed is not None:
-                    pairs.append(parsed)
-            cell_stats[(subset, model)] = pairs
+            ours_stats = panel_values.get("Mosaic-Surv (Ours)")
+            hgcn_stats = panel_values.get("hgcn")
+            frame_color = None
+            if ours_stats is not None and ranks.get("Mosaic-Surv (Ours)") == 1:
+                frame_color = "#d62728"
+            elif (
+                ours_stats is not None
+                and hgcn_stats is not None
+                and ours_stats[0] > hgcn_stats[0]
+            ):
+                frame_color = "#1f77b4"
+            if frame_color is not None:
+                for spine in ax.spines.values():
+                    spine.set_color(frame_color)
+                    spine.set_linewidth(2.0)
 
-    fig, axes = plt.subplots(2, 3, figsize=(15.5, 8.5), constrained_layout=True)
-    for idx, subset in enumerate(SUMMARY_SUBSETS):
-        ax = axes[idx // 3, idx % 3]
-        panel_values = {}
-        for model in models:
-            pairs = cell_stats[(subset, model)]
-            if not pairs:
-                continue
-            panel_values[model] = (
-                sum(mean for mean, _ in pairs) / len(pairs),
-                sum(std for _, std in pairs) / len(pairs),
-            )
-        available = [
-            (model, stats)
-            for model, stats in panel_values.items()
-            if stats is not None
-        ]
-        ranked = sorted(available, key=lambda item: (-item[1][0], item[0]))
-        ranks = {model: rank for rank, (model, _) in enumerate(ranked, start=1)}
-
-        ours_stats = panel_values.get("Mosaic-Surv (Ours)")
-        hgcn_stats = panel_values.get("hgcn")
-        frame_color = None
-        if ours_stats is not None and ranks.get("Mosaic-Surv (Ours)") == 1:
-            frame_color = "#d62728"
-        elif (
-            ours_stats is not None
-            and hgcn_stats is not None
-            and ours_stats[0] > hgcn_stats[0]
-        ):
-            frame_color = "#1f77b4"
-        if frame_color is not None:
-            for spine in ax.spines.values():
-                spine.set_color(frame_color)
-                spine.set_linewidth(2.0)
-
-        for k, model in enumerate(models):
-            stats = panel_values.get(model)
-            if stats is None:
-                continue
-            ax.bar(
-                k,
-                stats[0],
-                yerr=stats[1],
-                capsize=2,
-                color=MODEL_COLORS.get(model, MODEL_COLOR_FALLBACK),
-                edgecolor="black",
-                linewidth=0.3,
-            )
-            ax.annotate(
-                str(ranks[model]),
-                xy=(k, stats[0] + stats[1]),
-                xytext=(0, 3),
-                textcoords="offset points",
-                ha="center",
-                va="bottom",
-                fontsize=7,
-                fontweight="bold",
-            )
-        ax.set_title(f"Test subset {subset}", fontsize=10, pad=6)
-        ax.set_xticks(range(len(models)), models, rotation=55, ha="right", fontsize=6.5)
-        ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.45)
-        if idx % 3 == 0:
-            ax.set_ylabel("C-index")
+            for k, model in enumerate(models):
+                stats = panel_values.get(model)
+                if stats is None:
+                    continue
+                ax.bar(
+                    k,
+                    stats[0],
+                    yerr=stats[1],
+                    capsize=2,
+                    color=MODEL_COLORS.get(model, MODEL_COLOR_FALLBACK),
+                    edgecolor="black",
+                    linewidth=0.3,
+                )
+                ax.annotate(
+                    str(ranks[model]),
+                    xy=(k, stats[0] + stats[1]),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                    fontweight="bold",
+                )
+            ax.set_title(f"{study.replace('tcga_', '').upper()} / {subset}", fontsize=8)
+            ax.set_xticks(range(len(models)), models, rotation=55, ha="right", fontsize=6)
+            ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.45)
+            if j == 0:
+                ax.set_ylabel("C-index")
 
     out_dir = output_root / DISPLAY_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -505,7 +511,7 @@ def main() -> None:
         [model_label(dir_name) for dir_name in model_dir_names],
     )
     write_summary_table(summary_df, args.output_root)
-    write_ranking_figure(summary_df, args.output_root)
+    write_ranking_figure(study_dfs, args.output_root)
 
     print("Done.")
 
