@@ -36,7 +36,7 @@ HGCN_CLINIC_PKL_NAMES = (
     "edge_index_cli.pkl",
 )
 A_PIPELINE_OUTPUT_ROOT = Path(
-    "/data/fangyuxuan/projects/medical_dl/trident_project/CONCH-main/projects/outputs"
+    "/data/fangyuxuan/projects/medical_dl/trident_project/CONCH-main/projects/outputs_pgc"
 )
 T_IMG_FEA_NAME = "t_img_fea.pkl"
 T_RNA_FEA_NAME = "t_rna_fea.pkl"

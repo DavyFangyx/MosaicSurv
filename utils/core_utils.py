@@ -2644,10 +2644,7 @@ def _step(cur, args, loss_fn, model, optimizer, scheduler, train_loader, val_loa
 
     all_survival = _extract_survival_metadata(train_loader, val_loader, test_loader)
     val_cindex_max = 0
-    if args.modality in MISSING_MODALITY_BASELINES:
-        best_start_epoch = getattr(args, "save_best_from_epoch", 0)
-    else:
-        best_start_epoch = getattr(args, "save_best_from_epoch", 10)
+    best_start_epoch = getattr(args, "save_best_from_epoch", 0)
 
     for epoch in range(args.max_epochs):
         train_cindex, train_loss, train_cox_skip_count = _train_loop_survival(args, epoch, model, args.modality, train_loader, optimizer, scheduler, loss_fn)
