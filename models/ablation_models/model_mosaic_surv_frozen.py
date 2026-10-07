@@ -1,10 +1,10 @@
-"""Model A with a FiLM survival head trained as a frozen-backbone probe."""
+"""MosaicSurv (Pretrained VAE, Frozen Backbone): A 范式 + FiLM head 冻结 backbone probe。"""
 
 from models.model_SurvTriPoEVAE import SurvTriPoEVAE
 from models.model_utils import FiLMHead
 
 
-class SurvTriPoEVAE_AFiLM(SurvTriPoEVAE):
+class MosaicSurvFrozen(SurvTriPoEVAE):
     def __init__(self, *args, **kwargs):
         kwargs["poe_variant"] = "A"
         super().__init__(*args, **kwargs)

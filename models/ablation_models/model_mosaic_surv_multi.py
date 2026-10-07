@@ -1,10 +1,10 @@
-"""Model C + 7 pattern-specific heads, joint training."""
+"""MosaicSurv w/ Multi-Head: C 联合训练 + 7 个 pattern-specific 头。"""
 
 from models.model_SurvTriPoEVAE import SurvTriPoEVAE
 from models.model_utils import MultiPatternHead
 
 
-class SurvTriPoEVAE_CMulti(SurvTriPoEVAE):
+class MosaicSurvMulti(SurvTriPoEVAE):
     def __init__(self, *args, **kwargs):
         kwargs["poe_variant"] = "C"
         super().__init__(*args, **kwargs)

@@ -432,7 +432,7 @@ apply_preset() {
                 --batch_size_stage1 "$BATCH_SIZE_STAGE1"
             )
             ;;
-        mosaic_surv|mosaic_surv_noenum|mosaic_surv_kl|mosaic_surv_nojeffreys|mosaic_surv_detached)
+        mosaic_surv|mosaic_surv_noenum|mosaic_surv_kl|mosaic_surv_nojeffreys|mosaic_surv_detached|mosaic_surv_nodropout)
             if [ "$PRESET" = "mosaic_surv_kl" ]; then
                 MODEL="mosaic_surv_kl"
             elif [ "$PRESET" = "mosaic_surv_detached" ]; then
@@ -441,6 +441,10 @@ apply_preset() {
                 # 独立 modality 名：python 按 modality 建结果目录，
                 # 若复用 mosaic_surv（主模型）会覆盖主模型结果
                 MODEL="mosaic_surv_nojeffreys"
+            elif [ "$PRESET" = "mosaic_surv_nodropout" ]; then
+                # 独立 modality 名：训练期关闭模态 dropout 的消融，勿覆盖主模型结果
+                MODEL="mosaic_surv_nodropout"
+                POE_MODALITY_DROPOUT=0
             else
                 MODEL="mosaic_surv"
             fi

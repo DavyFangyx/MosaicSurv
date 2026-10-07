@@ -37,11 +37,11 @@ from models.ablation_models.model_B_nopretrain import SurvTriPoEVAE_BNoPretrain
 from models.ablation_models.model_B_kl import SurvTriPoEVAE_BKL
 from models.ablation_models.model_B_single import SurvTriPoEVAE_BSingle
 from models.ablation_models.model_B_multi import SurvTriPoEVAE_BMulti
-from models.ablation_models.model_B_film import SurvTriPoEVAE_BFiLM
-from models.ablation_models.model_A_film import SurvTriPoEVAE_AFiLM
-from models.ablation_models.model_C_single import SurvTriPoEVAE_CSingle
-from models.ablation_models.model_C_single_enum import SurvTriPoEVAE_CSingleEnum
-from models.ablation_models.model_C_multi import SurvTriPoEVAE_CMulti
+from models.ablation_models.model_mosaic_surv_twostage import MosaicSurvTwostage
+from models.ablation_models.model_mosaic_surv_frozen import MosaicSurvFrozen
+from models.ablation_models.model_mosaic_surv_single import MosaicSurvSingle
+from models.ablation_models.model_mosaic_surv_single_enum import MosaicSurvSingleEnum
+from models.ablation_models.model_mosaic_surv_multi import MosaicSurvMulti
 from models.ablation_models.model_mosaic_surv import MosaicSurv
 from models.ablation_models.model_mosaic_surv_noenum import MosaicSurvNoEnum
 from models.ablation_models.model_mosaic_surv_kl import MosaicSurvKL
@@ -119,6 +119,7 @@ POE_NEW_C_MODALITIES = {
     "mosaic_surv_kl",
     "mosaic_surv_detached",
     "mosaic_surv_nojeffreys",
+    "mosaic_surv_nodropout",
 }
 POE_MULTI_PATTERN_MODALITIES = {
     "survtri_poe_vae_b_multi",
@@ -130,12 +131,14 @@ POE_MULTI_PATTERN_MODALITIES = {
     "mosaic_surv_kl",
     "mosaic_surv_detached",
     "mosaic_surv_nojeffreys",
+    "mosaic_surv_nodropout",
 }
 POE_PGC_SELECTION_MODALITIES = {
     "mosaic_surv",
     "mosaic_surv_kl",
     "mosaic_surv_detached",
     "mosaic_surv_nojeffreys",
+    "mosaic_surv_nodropout",
 }
 POE_MODALITIES = {
     "survtri_poe_vae",
@@ -504,6 +507,7 @@ def _build_survival_dataset_factory(args):
             "mosaic_surv_noenum",
             "mosaic_surv_detached",
             "mosaic_surv_nojeffreys",
+            "mosaic_surv_nodropout",
         ) else False,
         is_survpc=True if args.modality == "survpc" else False,
         is_survpc_f=True if args.modality == "survpc_f" else False,
@@ -1228,16 +1232,17 @@ def _init_model(args, current_fold=None):
         model_cls = {
             "survtri_poe_vae_b_single": SurvTriPoEVAE_BSingle,
             "survtri_poe_vae_b_multi": SurvTriPoEVAE_BMulti,
-            "mosaic_surv_twostage": SurvTriPoEVAE_BFiLM,
-            "mosaic_surv_frozen": SurvTriPoEVAE_AFiLM,
-            "mosaic_surv_single": SurvTriPoEVAE_CSingle,
-            "mosaic_surv_single_enum": SurvTriPoEVAE_CSingleEnum,
-            "mosaic_surv_multi": SurvTriPoEVAE_CMulti,
+            "mosaic_surv_twostage": MosaicSurvTwostage,
+            "mosaic_surv_frozen": MosaicSurvFrozen,
+            "mosaic_surv_single": MosaicSurvSingle,
+            "mosaic_surv_single_enum": MosaicSurvSingleEnum,
+            "mosaic_surv_multi": MosaicSurvMulti,
             "mosaic_surv": MosaicSurv,
             "mosaic_surv_kl": MosaicSurvKL,
             "mosaic_surv_noenum": MosaicSurvNoEnum,
             "mosaic_surv_detached": MosaicSurvDetached,
             "mosaic_surv_nojeffreys": MosaicSurv,
+            "mosaic_surv_nodropout": MosaicSurv,
         }[args.modality]
         model = model_cls(**model_dict)
 

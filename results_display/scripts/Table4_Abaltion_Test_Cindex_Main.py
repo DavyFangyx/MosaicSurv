@@ -56,6 +56,7 @@ GROUP_SPECS = {
         "mosaic_surv_single",
         "mosaic_surv_single_enum",
         "mosaic_surv_noenum",
+        "mosaic_surv_nodropout",
         "mosaic_surv_multi",
     ],
     "B_training": [

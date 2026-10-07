@@ -1,10 +1,10 @@
-"""Model B + FiLM head, frozen encoder, no refill."""
+"""MosaicSurv (Two-Stage): B 范式 + FiLM head，冻结 encoder，无 refill。"""
 
 from models.model_SurvTriPoEVAE import SurvTriPoEVAE
 from models.model_utils import FiLMHead
 
 
-class SurvTriPoEVAE_BFiLM(SurvTriPoEVAE):
+class MosaicSurvTwostage(SurvTriPoEVAE):
     def __init__(self, *args, **kwargs):
         kwargs["poe_variant"] = "B"
         super().__init__(*args, **kwargs)

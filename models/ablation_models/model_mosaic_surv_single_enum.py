@@ -1,4 +1,4 @@
-"""Model C with a shared single survival head evaluated over all patterns."""
+"""MosaicSurv w/ Single Head + Enumeration: 共享单头 + 7-pattern PoE 枚举。"""
 
 import torch.nn as nn
 
@@ -25,8 +25,8 @@ class _SharedSingleHead(nn.Module):
         return self.classifier(self.fuse_fc(mu_joint))
 
 
-class SurvTriPoEVAE_CSingleEnum(SurvTriPoEVAE):
-    """C model with one shared head and seven-pattern PoE enumeration."""
+class MosaicSurvSingleEnum(SurvTriPoEVAE):
+    """C 范式 + 一个共享头 + 7-pattern PoE 枚举。"""
 
     def __init__(self, *args, **kwargs):
         kwargs["poe_variant"] = "C"

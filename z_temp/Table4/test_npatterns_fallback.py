@@ -7,8 +7,8 @@ backward 会抛 RuntimeError: element 0 of tensors does not require grad。
 """
 import torch
 
-from models.ablation_models.model_A_film import SurvTriPoEVAE_AFiLM
-from models.ablation_models.model_B_film import SurvTriPoEVAE_BFiLM
+from models.ablation_models.model_mosaic_surv_frozen import MosaicSurvFrozen
+from models.ablation_models.model_mosaic_surv_twostage import MosaicSurvTwostage
 from models.ablation_models.model_mosaic_surv import MosaicSurv
 
 
@@ -48,7 +48,7 @@ def run_batch(model, B):
 
 # --- Test 1: 小 batch（<8）触发兜底，A/B 变体 loss 有梯度，backward 不崩 ---
 print("=== Test 1: small batch (<8) fallback keeps gradient ===")
-for cls, name in ((SurvTriPoEVAE_AFiLM, "AFiLM(frozen)"), (SurvTriPoEVAE_BFiLM, "BFiLM(twostage)")):
+for cls, name in ((MosaicSurvFrozen, "AFiLM(frozen)"), (MosaicSurvTwostage, "BFiLM(twostage)")):
     model = cls(**make_kwargs("A" if name.startswith("A") else "B"))
     # 模拟 stage2：冻结 backbone、只训 FiLM 头
     if name.startswith("A"):
@@ -66,7 +66,7 @@ for cls, name in ((SurvTriPoEVAE_AFiLM, "AFiLM(frozen)"), (SurvTriPoEVAE_BFiLM, 
 
 # --- Test 2: 正常 batch（16）行为不变 ---
 print("=== Test 2: normal batch (16) regression ===")
-for cls, name in ((SurvTriPoEVAE_AFiLM, "AFiLM(frozen)"), (SurvTriPoEVAE_BFiLM, "BFiLM(twostage)")):
+for cls, name in ((MosaicSurvFrozen, "AFiLM(frozen)"), (MosaicSurvTwostage, "BFiLM(twostage)")):
     model = cls(**make_kwargs("A" if name.startswith("A") else "B"))
     if name.startswith("A"):
         model.freeze_backbone_for_probe()

@@ -190,6 +190,7 @@ if __name__ == "__main__":
             "mosaic_surv_noenum",
             "mosaic_surv_detached",
             "mosaic_surv_nojeffreys",
+            "mosaic_surv_nodropout",
         ) else False,
         is_survpc = True if args.modality == "survpc" else False,
         is_survpc_f = True if args.modality == "survpc_f" else False,

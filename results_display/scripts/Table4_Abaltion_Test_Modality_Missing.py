@@ -55,6 +55,7 @@ A_GROUP_MODELS = [
     "mosaic_surv_single",
     "mosaic_surv_single_enum",
     "mosaic_surv_noenum",
+    "mosaic_surv_nodropout",
     "mosaic_surv_multi",
 ]
 
@@ -65,6 +66,7 @@ MODEL_COLORS = {
     "Mosaic-Surv w/ Single Head": "#1f77b4",
     "Mosaic-Surv w/ Single Head + Enumeration": "#2ca02c",
     "Mosaic-Surv w/o Pattern Enumeration": "#ff7f0e",
+    "Mosaic-Surv w/o Train-Time Modality Dropout": "#8c564b",
     "Mosaic-Surv w/ Multi-Head": "#9467bd",
 }
 MODEL_COLOR_FALLBACK = "#17becf"

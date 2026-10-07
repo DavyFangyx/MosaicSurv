@@ -25,6 +25,7 @@ FORMAL_NAMES: dict[str, str] = {
     "mosaic_surv_kl": "Mosaic-Surv w/ KL",
     "mosaic_surv_nojeffreys": "Mosaic-Surv w/o Jeffreys",
     "mosaic_surv_detached": "Mosaic-Surv w/ Detached L_surv",
+    "mosaic_surv_nodropout": "Mosaic-Surv w/o Train-Time Modality Dropout",
 }
 
 # 旧拼写（Cfilm 时代，全部小写做键）→ 新注册键

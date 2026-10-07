@@ -1,9 +1,9 @@
 """Smoke test for the Table4 ablation fixes: a_film routing + surv0 grad blocking."""
 import torch
 
-from models.ablation_models.model_A_film import SurvTriPoEVAE_AFiLM
-from models.ablation_models.model_C_film import SurvTriPoEVAE_CFiLM
-from models.ablation_models.model_C_film_surv0 import SurvTriPoEVAE_CFiLMNoSurvGrad
+from models.ablation_models.model_mosaic_surv_frozen import MosaicSurvFrozen
+from models.ablation_models.model_mosaic_surv import MosaicSurv
+from models.ablation_models.model_mosaic_surv_detached import MosaicSurvDetached
 
 B = 16
 N = 8
@@ -53,7 +53,7 @@ def grad_ok(module):
 
 # ---------- Test 1: AFiLM routes through FiLM head ----------
 print("=== Test 1: AFiLM _survival_head routing ===")
-model = SurvTriPoEVAE_AFiLM(**make_kwargs("A"))
+model = MosaicSurvFrozen(**make_kwargs("A"))
 model.eval()  # 关闭 Dropout，保证两次调用可比
 mu = torch.randn(B, 128, requires_grad=True)
 ones = torch.ones(B, 3, dtype=torch.bool)
@@ -80,7 +80,7 @@ print("OK: only FiLM head receives gradient")
 
 # ---------- Test 3: CFiLM (baseline) surv loss reaches encoder + alpha ----------
 print("=== Test 3: CFiLM surv-loss gradient reaches backbone ===")
-model_c = SurvTriPoEVAE_CFiLM(**make_kwargs("C"))
+model_c = MosaicSurv(**make_kwargs("C"))
 model_c.train()
 model_c(x_path=x_path, x_omic=x_omic, x_clinic=x_clinic, wsi_mask=None, avail=avail)
 loss = model_c.survival_loss_from_cached(event_time, censor, fake_loss)
@@ -92,7 +92,7 @@ print("OK: head + encoder + alpha all receive gradient")
 
 # ---------- Test 4: surv0 blocks surv gradient from encoder + alpha ----------
 print("=== Test 4: CFiLMNoSurvGrad blocks surv gradient from backbone ===")
-model_s = SurvTriPoEVAE_CFiLMNoSurvGrad(**make_kwargs("C"))
+model_s = MosaicSurvDetached(**make_kwargs("C"))
 model_s.train()
 model_s(x_path=x_path, x_omic=x_omic, x_clinic=x_clinic, wsi_mask=None, avail=avail)
 loss = model_s.survival_loss_from_cached(event_time, censor, fake_loss)
