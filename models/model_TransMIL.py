@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from models.model_utils import *
-from nystrom_attention import NystromAttention
+from third_party.nystrom_attention import NystromAttention
 
 ################################
 # Attention MIL Implementation #

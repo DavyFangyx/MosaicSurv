@@ -8,7 +8,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from nystrom_attention import NystromAttention
 import warnings
 
 class BilinearFusion(nn.Module):
@@ -218,37 +217,6 @@ class VAETransformerBlock(nn.Module):
         )
         x = x + attn_out
         x = x + self.ffn(self.ffn_norm(x))
-        return x
-
-
-class NystromVAETransformerBlock(nn.Module):
-    def __init__(self, dim, nhead=8, mlp_dim=1024, num_landmarks=None, dropout=0.1):
-        super().__init__()
-        self.attn_norm = nn.LayerNorm(dim)
-        self.attn = NystromAttention(
-            dim=dim,
-            dim_head=dim // nhead,
-            heads=nhead,
-            num_landmarks=num_landmarks or dim // 2,
-            pinv_iterations=6,
-            residual=True,
-            dropout=dropout,
-        )
-        self.ffn_norm = nn.LayerNorm(dim)
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, mlp_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(mlp_dim, dim),
-            nn.Dropout(dropout),
-        )
-
-    def forward(self, x, padding_mask=None):
-        valid_mask = None if padding_mask is None else ~padding_mask
-        x = x + self.attn(self.attn_norm(x), mask=valid_mask)
-        x = x + self.ffn(self.ffn_norm(x))
-        if padding_mask is not None:
-            x = x.masked_fill(padding_mask.unsqueeze(-1), 0.0)
         return x
 
 

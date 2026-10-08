@@ -1,3 +1,6 @@
+# Vendored from https://github.com/lucidrains/nystrom-attention
+# Copyright (c) 2021 Phil Wang (lucidrains), MIT License.
+# 本地修改：forward 的 mask 路径（landmark 全为 padding 时的 landmark_mask 处理）。
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
