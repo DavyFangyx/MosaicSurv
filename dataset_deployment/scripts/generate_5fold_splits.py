@@ -87,14 +87,14 @@ def collect_case_set_from_dirs(root: Path) -> tuple[list[str], dict[str, set[str
     return dir_names, case_sets, intersection
 
 
-def collect_wsi_ready_cases(metadata_df: pd.DataFrame, data_root_dir: Path) -> set[str]:
+def collect_wsi_ready_cases(metadata_df: pd.DataFrame, data_root_dir: Path, wsi_ext: str = ".svs") -> set[str]:
     if not data_root_dir.exists():
         return set()
     ready_cases: set[str] = set()
     for case_id, group in metadata_df.groupby("case_id", sort=False):
         all_present = True
         for slide_id in group["slide_id"].dropna().astype(str):
-            slide_stub = slide_id[:-4] if slide_id.endswith(".svs") else slide_id
+            slide_stub = slide_id[: -len(wsi_ext)] if slide_id.endswith(wsi_ext) else slide_id
             if not (data_root_dir / f"{slide_stub}.pt").exists():
                 all_present = False
                 break
@@ -113,7 +113,7 @@ def build_split_eligibility(study: str) -> tuple[pd.DataFrame, dict[str, object]
     metadata_df = pd.read_csv(paths["label_file"])
     case_metadata_df = load_case_level_metadata(paths["label_file"])
     metadata_cases = set(case_metadata_df["case_id"].astype(str))
-    wsi_cases = collect_wsi_ready_cases(metadata_df, paths["data_root_dir"])
+    wsi_cases = collect_wsi_ready_cases(metadata_df, paths["data_root_dir"], wsi_ext=config.raw.wsi_ext)
 
     clinic_dir_names, clinic_case_sets, clinic_cases = collect_case_set_from_dirs(paths["workspace_root"] / "C")
     gene_dir_names, gene_case_sets, gene_cases = collect_case_set_from_dirs(paths["workspace_root"] / "G")

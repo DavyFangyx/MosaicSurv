@@ -193,7 +193,7 @@ DATASETS = [
         wsi_root=BASE_ROOT / "CPTAC_data" / "cptac_coad" / "cptac_coad" / "cptac_coad",
         clinic_files=(BASE_ROOT / "CPTAC_data" / "cptac_coad" / "clinical" / "clinical.cart.2026-10-10.json",),
         case_dirs=(BASE_ROOT / "CPTAC_data" / "cptac_coad" / "clinical",),
-        project_filter=("CPTAC-2",),
+        project_filter=("CPTAC-COAD",),
         wsi_glob="*.dcm",
     ),
     DatasetConfig(
@@ -203,7 +203,7 @@ DATASETS = [
         wsi_root=BASE_ROOT / "CPTAC_data" / "cptac_brca" / "cptac_brca" / "cptac_brca",
         clinic_files=(BASE_ROOT / "CPTAC_data" / "cptac_brca" / "clinical" / "clinical.cart.2026-10-10.json",),
         case_dirs=(BASE_ROOT / "CPTAC_data" / "cptac_brca" / "clinical",),
-        project_filter=("CPTAC-2",),
+        project_filter=("CPTAC-BRCA",),
         wsi_glob="*.dcm",
     ),
 ]

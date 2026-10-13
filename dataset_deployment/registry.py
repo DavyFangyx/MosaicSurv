@@ -322,7 +322,7 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
             case_dirs=(
                 "/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad/clinical",
             ),
-            project_filter=("CPTAC-2",),
+            project_filter=("CPTAC-COAD",),
             wsi_glob="*.dcm",
             wsi_ext=".dcm",
             notes=(
@@ -353,7 +353,7 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
             case_dirs=(
                 "/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca/clinical",
             ),
-            project_filter=("CPTAC-2",),
+            project_filter=("CPTAC-BRCA",),
             wsi_glob="*.dcm",
             wsi_ext=".dcm",
             notes=(

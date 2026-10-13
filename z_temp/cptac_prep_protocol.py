@@ -28,13 +28,13 @@ CPTAC_CASE_RE = re.compile(r"^(\d{2}(?:BR|CO)\d{3})$")
 
 COHORTS = {
     "cptac_coad": {
-        "project_id": "CPTAC-2",
+        "project_id": "CPTAC-COAD",
         "study": "cptac_coad",
         "display": "CPTAC-COAD",
         "sex_map": {"Male": "male", "Female": "female"},
     },
     "cptac_brca": {
-        "project_id": "CPTAC-2",
+        "project_id": "CPTAC-BRCA",
         "study": "cptac_brca",
         "display": "CPTAC-BRCA",
         "sex_map": {"Male": "male", "Female": "female"},

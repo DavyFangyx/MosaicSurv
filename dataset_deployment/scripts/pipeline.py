@@ -487,7 +487,7 @@ def generate_metadata_for_study(
                     "case_id": patient_id,
                     "slide_id": slide_id,
                     "age": extract_age(case),
-                    "site": patient_id.split("-")[1],
+                    "site": patient_id.split("-")[1] if "-" in patient_id else patient_id[:4],
                     "survival_months": survival_months,
                     "censorship": censorship,
                     "is_female": extract_is_female(case),
