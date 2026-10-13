@@ -5,8 +5,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from dataset_deployment.registry import PATIENT_ID_RE
 
-TCGA_CASE_RE = re.compile(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", re.IGNORECASE)
+
+TCGA_CASE_RE = PATIENT_ID_RE
 
 
 def extract_case_id_from_feature_name(file_name: str) -> str | None:

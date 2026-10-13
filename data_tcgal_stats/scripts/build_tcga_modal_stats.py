@@ -8,6 +8,7 @@ import csv
 import json
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -17,7 +18,11 @@ from typing import Iterable
 
 BASE_ROOT = Path("/data/lizhe/Medteam_projects")
 OUTPUT_ROOT = Path(__file__).resolve().parents[1]
-TCGA_PATIENT_RE = re.compile(r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4})", re.IGNORECASE)
+CACHE_ROOT = OUTPUT_ROOT.parent / "dataset_deployment" / "mappings"
+# 患者 ID 统一模式：TCGA 条码（TCGA-XX-XXXX）或 CPTAC 队列编号（如 01BR001 / 20CO012）。
+TCGA_PATIENT_RE = re.compile(
+    r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}|\d{2}(?:BR|CO)\d{3})", re.IGNORECASE
+)
 
 CATEGORIES = [
     ("PCG", "全部完整（PCG）", True, True, True),
@@ -41,6 +46,8 @@ class DatasetConfig:
     project_filter: tuple[str, ...] = ()
     rna_manifest: Path | None = None
     skip_reason: str | None = None
+    # WSI 文件约定（TCGA 为 .svs；CPTAC 等 IDC 队列为 .dcm）
+    wsi_glob: str = "*.svs"
 
 
 DATASETS = [
@@ -159,6 +166,46 @@ DATASETS = [
         project_filter=("TCGA-KICH",),
         rna_manifest=BASE_ROOT / "kindey_cancer_TCGA" / "gdc_manifest.2026-03-18.111422_Bulk.txt",
     ),
+    DatasetConfig(
+        name="TCGA-LUAD",
+        root=BASE_ROOT / "Lung",
+        gene_root=BASE_ROOT / "Lung" / "Bulk_RNA",
+        wsi_root=BASE_ROOT / "Lung" / "WSI",
+        clinic_files=(BASE_ROOT / "Lung" / "clinical" / "clinical.cart.2026-06-01.json",),
+        case_dirs=(BASE_ROOT / "Lung" / "clinical",),
+        project_filter=("TCGA-LUAD",),
+        rna_manifest=BASE_ROOT / "Lung" / "gdc_manifest.2026-06-10.161746_rna.txt",
+    ),
+    DatasetConfig(
+        name="TCGA-LUSC",
+        root=BASE_ROOT / "Lung",
+        gene_root=BASE_ROOT / "Lung" / "Bulk_RNA",
+        wsi_root=BASE_ROOT / "Lung" / "WSI",
+        clinic_files=(BASE_ROOT / "Lung" / "clinical" / "clinical.cart.2026-06-01.json",),
+        case_dirs=(BASE_ROOT / "Lung" / "clinical",),
+        project_filter=("TCGA-LUSC",),
+        rna_manifest=BASE_ROOT / "Lung" / "gdc_manifest.2026-06-10.161746_rna.txt",
+    ),
+    DatasetConfig(
+        name="CPTAC-COAD",
+        root=BASE_ROOT / "CPTAC_data" / "cptac_coad",
+        gene_root=BASE_ROOT / "CPTAC_data" / "cptac_coad" / "Bulk_RNA",
+        wsi_root=BASE_ROOT / "CPTAC_data" / "cptac_coad" / "cptac_coad" / "cptac_coad",
+        clinic_files=(BASE_ROOT / "CPTAC_data" / "cptac_coad" / "clinical" / "clinical.cart.2026-10-10.json",),
+        case_dirs=(BASE_ROOT / "CPTAC_data" / "cptac_coad" / "clinical",),
+        project_filter=("CPTAC-2",),
+        wsi_glob="*.dcm",
+    ),
+    DatasetConfig(
+        name="CPTAC-BRCA",
+        root=BASE_ROOT / "CPTAC_data" / "cptac_brca",
+        gene_root=BASE_ROOT / "CPTAC_data" / "cptac_brca" / "Bulk_RNA",
+        wsi_root=BASE_ROOT / "CPTAC_data" / "cptac_brca" / "cptac_brca" / "cptac_brca",
+        clinic_files=(BASE_ROOT / "CPTAC_data" / "cptac_brca" / "clinical" / "clinical.cart.2026-10-10.json",),
+        case_dirs=(BASE_ROOT / "CPTAC_data" / "cptac_brca" / "clinical",),
+        project_filter=("CPTAC-2",),
+        wsi_glob="*.dcm",
+    ),
 ]
 
 
@@ -258,7 +305,7 @@ def load_wsi_patients(config: DatasetConfig, case_uuids: dict[str, set[str]]) ->
     file_map = load_sample_sheet_maps(config.case_dirs)
     file_map.update(load_metadata_maps(config.case_dirs))
     patients: set[str] = set()
-    for path in iter_files(config.wsi_root, "*.svs"):
+    for path in iter_files(config.wsi_root, config.wsi_glob):
         mapped = file_map.get(path.name)
         patient_id = mapped[0] if mapped else normalize_patient_id(path.name)
         case_uuid = mapped[1] if mapped else None
@@ -278,6 +325,26 @@ def load_manifest_file_ids(path: Path | None) -> dict[str, str]:
             for row in reader
             if row.get("filename") and row.get("id")
         }
+
+
+def study_key_of(dataset_name: str) -> str:
+    return dataset_name.lower().replace("-", "_")
+
+
+def load_cached_file_case_mapping(config: DatasetConfig) -> dict[str, tuple[str, str | None]]:
+    """Reuse the RNA file->case mapping cached by dataset_deployment (<study>_rna_file_case_map.csv)."""
+    cache_path = CACHE_ROOT / f"{study_key_of(config.name)}_rna_file_case_map.csv"
+    if not cache_path.exists():
+        return {}
+    mapping: dict[str, tuple[str, str | None]] = {}
+    with cache_path.open("r", encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            file_name = (row.get("file_name") or "").strip()
+            patient_id = normalize_patient_id(row.get("case_id") or row.get("submitter_id"))
+            case_uuid = (row.get("case_uuid") or "").strip() or None
+            if file_name and patient_id:
+                mapping[file_name] = (patient_id, case_uuid)
+    return mapping
 
 
 def fetch_gdc_file_mapping(file_ids: list[str]) -> dict[str, tuple[str, str | None]]:
@@ -300,8 +367,16 @@ def fetch_gdc_file_mapping(file_ids: list[str]) -> dict[str, tuple[str, str | No
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                break
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                if attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
         for hit in payload.get("data", {}).get("hits", []):
             file_name = hit.get("file_name")
             cases = hit.get("cases") or []
@@ -319,6 +394,7 @@ def load_gene_patients(
 ) -> tuple[set[str], list[str]]:
     file_map = load_sample_sheet_maps(config.case_dirs)
     file_map.update(load_metadata_maps(config.case_dirs))
+    file_map.update(load_cached_file_case_mapping(config))
     existing_files = iter_files(config.gene_root, "*.rna_seq.augmented_star_gene_counts.tsv")
     unmapped = [path.name for path in existing_files if path.name not in file_map]
 
@@ -468,15 +544,41 @@ def main() -> int:
         action="store_false",
         help="Disable GDC API lookup.",
     )
+    parser.add_argument(
+        "--dataset",
+        action="append",
+        default=[],
+        help="Only process the named dataset(s), e.g. --dataset TCGA-LUAD. Repeatable, or comma-separated.",
+    )
     args = parser.parse_args()
 
+    selected: set[str] = set()
+    for item in args.dataset:
+        for name in item.split(","):
+            name = name.strip()
+            if name:
+                selected.add(name)
+
     summary_rows: list[dict[str, object]] = []
+    processed_names: set[str] = set()
     for config in DATASETS:
+        if selected and config.name not in selected:
+            continue
         print(f"[INFO] Processing {config.name}", file=sys.stderr)
         summary_rows.extend(process_dataset(config, allow_gdc_api=args.allow_gdc_api))
+        processed_names.add(config.name)
+
+    summary_path = OUTPUT_ROOT / "汇总.csv"
+    if selected and summary_path.exists():
+        existing_rows: list[dict[str, object]] = []
+        with summary_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if row.get("dataset") not in processed_names:
+                    existing_rows.append(row)
+        summary_rows = existing_rows + summary_rows
 
     write_csv(
-        OUTPUT_ROOT / "汇总.csv",
+        summary_path,
         ["dataset", "class_code", "缺失类型", "样本数", "占比", "ratio", "分母"],
         summary_rows,
     )

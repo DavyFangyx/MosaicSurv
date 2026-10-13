@@ -67,6 +67,50 @@ datasets:
     split_dir: splits/5foldcv/tcga_lihc
     workspace_root: SurvPGC_Workspace/tcga_lihc
     enabled: true
+  tcga_luad:
+    display_name: TCGA-LUAD
+    deployment_doc: datasets/tcga_luad.md
+    stats_dir: data_tcgal_stats/TCGA-LUAD
+    metadata_csv: datasets_csv/metadata/tcga_luad.csv
+    clinical_csv: datasets_csv/clinical_data/tcga_luad_clinical.csv
+    rna_dir: datasets_csv/raw_rna_data/combine/luad
+    feature_manifest_csv: datasets_csv/feature_manifests/tcga_luad.csv
+    split_dir: splits/5foldcv/tcga_luad
+    workspace_root: SurvPGC_Workspace/tcga_luad
+    enabled: true
+  tcga_lusc:
+    display_name: TCGA-LUSC
+    deployment_doc: datasets/tcga_lusc.md
+    stats_dir: data_tcgal_stats/TCGA-LUSC
+    metadata_csv: datasets_csv/metadata/tcga_lusc.csv
+    clinical_csv: datasets_csv/clinical_data/tcga_lusc_clinical.csv
+    rna_dir: datasets_csv/raw_rna_data/combine/lusc
+    feature_manifest_csv: datasets_csv/feature_manifests/tcga_lusc.csv
+    split_dir: splits/5foldcv/tcga_lusc
+    workspace_root: SurvPGC_Workspace/tcga_lusc
+    enabled: true
+  cptac_coad:
+    display_name: CPTAC-COAD
+    deployment_doc: datasets/cptac_coad.md
+    stats_dir: data_tcgal_stats/CPTAC-COAD
+    metadata_csv: datasets_csv/metadata/cptac_coad.csv
+    clinical_csv: datasets_csv/clinical_data/cptac_coad_clinical.csv
+    rna_dir: datasets_csv/raw_rna_data/combine/cptac_coad
+    feature_manifest_csv: datasets_csv/feature_manifests/cptac_coad.csv
+    split_dir: splits/5foldcv/cptac_coad
+    workspace_root: SurvPGC_Workspace/cptac_coad
+    enabled: true
+  cptac_brca:
+    display_name: CPTAC-BRCA
+    deployment_doc: datasets/cptac_brca.md
+    stats_dir: data_tcgal_stats/CPTAC-BRCA
+    metadata_csv: datasets_csv/metadata/cptac_brca.csv
+    clinical_csv: datasets_csv/clinical_data/cptac_brca_clinical.csv
+    rna_dir: datasets_csv/raw_rna_data/combine/cptac_brca
+    feature_manifest_csv: datasets_csv/feature_manifests/cptac_brca.csv
+    split_dir: splits/5foldcv/cptac_brca
+    workspace_root: SurvPGC_Workspace/cptac_brca
+    enabled: true
   tcga_prad:
     display_name: TCGA-PRAD
     deployment_doc: datasets/tcga_prad.md

@@ -4,6 +4,7 @@ import csv
 import json
 import random
 import sys
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -21,6 +22,7 @@ from dataset_deployment.registry import (
     get_dataset_config,
     infer_standard_paths,
     list_enabled_studies,
+    normalize_patient_id,
 )
 from dataset_deployment.workspace_features import build_case_feature_index, resolve_case_feature_path
 
@@ -78,15 +80,6 @@ def load_patient_table(config: DatasetConfig) -> pd.DataFrame:
     patient_df = pd.read_csv(config.patient_table_csv)
     patient_df.columns = [str(col).strip() for col in patient_df.columns]
     return patient_df
-
-
-def normalize_patient_id(value: str | None) -> str | None:
-    if not value:
-        return None
-    value = str(value).upper()
-    if value.startswith("TCGA-") and len(value) >= 12:
-        return value[:12]
-    return None
 
 
 def iter_files(root: Path, pattern: str) -> list[Path]:
@@ -244,8 +237,16 @@ def fetch_gdc_file_mapping(file_ids: list[str]) -> dict[str, tuple[str, str | No
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        payload = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    payload = json.loads(response.read().decode("utf-8"))
+                break
+            except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                if attempt == 2:
+                    raise
+                time.sleep(2 * (attempt + 1))
         for hit in payload.get("data", {}).get("hits", []):
             file_name = hit.get("file_name")
             case = (hit.get("cases") or [{}])[0]
@@ -267,7 +268,7 @@ def build_wsi_lookup(config: DatasetConfig) -> dict[str, list[str]]:
                 patient_id = normalize_patient_id(slide_stub)
                 if not patient_id:
                     continue
-                wsi_lookup.setdefault(patient_id, []).append(f"{slide_stub}.svs")
+                wsi_lookup.setdefault(patient_id, []).append(f"{slide_stub}{config.raw.wsi_ext}")
             for patient_id in wsi_lookup:
                 wsi_lookup[patient_id] = sorted(set(wsi_lookup[patient_id]))
             return wsi_lookup
@@ -277,7 +278,7 @@ def build_wsi_lookup(config: DatasetConfig) -> dict[str, list[str]]:
     allowed_projects = set(config.raw.project_filter)
     case_lookup = load_case_lookup(config)
     wsi_lookup: dict[str, list[str]] = {}
-    for path in iter_files(Path(config.raw.wsi_root), "*.svs"):
+    for path in iter_files(Path(config.raw.wsi_root), config.raw.wsi_glob):
         mapped = file_map.get(path.name)
         patient_id = mapped[0] if mapped else normalize_patient_id(path.name)
         if not patient_id:
@@ -378,7 +379,7 @@ def extract_is_female(case: dict) -> int:
 
 def extract_oncotree_code(case: dict) -> str:
     project_id = case.get("project", {}).get("project_id", "")
-    if project_id.startswith("TCGA-"):
+    if project_id.startswith(("TCGA-", "CPTAC-")):
         return project_id.split("-", 1)[1]
     return project_id or "N/A"
 
@@ -399,7 +400,7 @@ def normalize_grade(raw_grade: str | None) -> str:
 
 def extract_subtype(case: dict) -> str:
     project_id = case.get("project", {}).get("project_id", "")
-    if project_id.startswith("TCGA-"):
+    if project_id.startswith(("TCGA-", "CPTAC-")):
         return project_id.split("-", 1)[1]
     return project_id or "N/A"
 
@@ -689,7 +690,8 @@ def validate_workspace_for_study(
 
     missing_wsi: list[str] = []
     for slide_id in metadata_df["slide_id"].dropna().astype(str):
-        slide_stub = slide_id[:-4] if slide_id.endswith(".svs") else slide_id
+        wsi_ext = get_dataset_config(config.study).raw.wsi_ext
+        slide_stub = slide_id[: -len(wsi_ext)] if slide_id.endswith(wsi_ext) else slide_id
         if not (paths["data_root_dir"] / f"{slide_stub}.pt").exists():
             missing_wsi.append(slide_id)
 

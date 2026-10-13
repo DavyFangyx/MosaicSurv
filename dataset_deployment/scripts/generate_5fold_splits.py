@@ -183,9 +183,14 @@ def build_split_eligibility(study: str) -> tuple[pd.DataFrame, dict[str, object]
     return eligibility_df, summary
 
 
-def write_split_summary(summary_rows: list[dict[str, object]]) -> None:
+def write_split_summary(summary_rows: list[dict[str, object]], *, merge_existing: bool = False) -> None:
     summary_path = PROJ_ROOT / "splits" / "5foldcv" / "汇总.csv"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
+    if merge_existing and summary_path.exists():
+        processed = {str(row.get("study")) for row in summary_rows}
+        existing = pd.read_csv(summary_path)
+        kept = existing[~existing["study"].astype(str).isin(processed)]
+        summary_rows = kept.to_dict("records") + summary_rows
     pd.DataFrame(summary_rows).to_csv(summary_path, index=False)
 
 
@@ -328,7 +333,7 @@ def main() -> None:
         summaries.append({key: value for key, value in result.items() if key not in {"eligibility_csv", "cohort_metadata_csv", "output"}})
         print(result)
     if summaries:
-        write_split_summary(summaries)
+        write_split_summary(summaries, merge_existing=bool(args.study))
 
 
 if __name__ == "__main__":

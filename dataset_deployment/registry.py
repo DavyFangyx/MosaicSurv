@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +9,18 @@ DEFAULT_STUDY = "tcga_coad"
 DEFAULT_WSI_EXPERIMENT = "uni_v1"
 DEFAULT_CLINIC_EXPERIMENT = "L4"
 DEFAULT_GENE_EXPERIMENT = "scFoundation_embedding_gene_raw"
+
+# 患者 ID 统一模式：TCGA 条码（TCGA-XX-XXXX）或 CPTAC 队列编号（如 01BR001 / 20CO012）。
+PATIENT_ID_RE = re.compile(
+    r"(TCGA-[A-Z0-9]{2}-[A-Z0-9]{4}|\d{2}(?:BR|CO)\d{3})", re.IGNORECASE
+)
+
+
+def normalize_patient_id(value: str | None) -> str | None:
+    if not value:
+        return None
+    match = PATIENT_ID_RE.search(str(value).upper())
+    return match.group(1) if match else None
 
 
 @dataclass(frozen=True)
@@ -20,6 +33,9 @@ class RawDatasetConfig:
     project_filter: tuple[str, ...] = ()
     rna_manifest: str | None = None
     notes: tuple[str, ...] = ()
+    # WSI 文件约定（TCGA 为 .svs；CPTAC 等 IDC 队列为 .dcm）
+    wsi_glob: str = "*.svs"
+    wsi_ext: str = ".svs"
 
 
 @dataclass(frozen=True)
@@ -222,6 +238,128 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
             notes=(
                 "LIHC keeps clinic files in both clinical/ and the dataset root.",
                 "Local RNA file-to-case metadata is incomplete; GDC API lookup may be needed.",
+            ),
+        ),
+    ),
+    "tcga_luad": DatasetConfig(
+        study="tcga_luad",
+        display_name="TCGA-LUAD",
+        stats_dir="data_tcgal_stats/TCGA-LUAD",
+        metadata_csv="datasets_csv/metadata/tcga_luad.csv",
+        clinical_csv="datasets_csv/clinical_data/tcga_luad_clinical.csv",
+        rna_dir="datasets_csv/raw_rna_data/combine/luad",
+        feature_manifest_csv="datasets_csv/feature_manifests/tcga_luad.csv",
+        split_dir="splits/5foldcv/tcga_luad",
+        workspace_root="SurvPGC_Workspace/tcga_luad",
+        enabled=True,
+        raw=RawDatasetConfig(
+            raw_root="/data/lizhe/Medteam_projects/Lung",
+            gene_root="/data/lizhe/Medteam_projects/Lung/Bulk_RNA",
+            wsi_root="/data/lizhe/Medteam_projects/Lung/WSI",
+            clinical_jsons=(
+                "/data/lizhe/Medteam_projects/Lung/clinical/clinical.cart.2026-06-01.json",
+            ),
+            case_dirs=(
+                "/data/lizhe/Medteam_projects/Lung/clinical",
+            ),
+            project_filter=("TCGA-LUAD",),
+            rna_manifest="/data/lizhe/Medteam_projects/Lung/gdc_manifest.2026-06-10.161746_rna.txt",
+            notes=(
+                "Lung datasets share the same raw root and are split by project.project_id.",
+                "Shared WSI source TCGA-LUNG is filtered by TCGA-LUAD_patients.csv.",
+                "No local RNA sample sheet; file-to-case mapping via GDC API (cached in dataset_deployment/mappings).",
+            ),
+        ),
+    ),
+    "tcga_lusc": DatasetConfig(
+        study="tcga_lusc",
+        display_name="TCGA-LUSC",
+        stats_dir="data_tcgal_stats/TCGA-LUSC",
+        metadata_csv="datasets_csv/metadata/tcga_lusc.csv",
+        clinical_csv="datasets_csv/clinical_data/tcga_lusc_clinical.csv",
+        rna_dir="datasets_csv/raw_rna_data/combine/lusc",
+        feature_manifest_csv="datasets_csv/feature_manifests/tcga_lusc.csv",
+        split_dir="splits/5foldcv/tcga_lusc",
+        workspace_root="SurvPGC_Workspace/tcga_lusc",
+        enabled=True,
+        raw=RawDatasetConfig(
+            raw_root="/data/lizhe/Medteam_projects/Lung",
+            gene_root="/data/lizhe/Medteam_projects/Lung/Bulk_RNA",
+            wsi_root="/data/lizhe/Medteam_projects/Lung/WSI",
+            clinical_jsons=(
+                "/data/lizhe/Medteam_projects/Lung/clinical/clinical.cart.2026-06-01.json",
+            ),
+            case_dirs=(
+                "/data/lizhe/Medteam_projects/Lung/clinical",
+            ),
+            project_filter=("TCGA-LUSC",),
+            rna_manifest="/data/lizhe/Medteam_projects/Lung/gdc_manifest.2026-06-10.161746_rna.txt",
+            notes=(
+                "Lung datasets share the same raw root and are split by project.project_id.",
+                "Shared WSI source TCGA-LUNG is filtered by TCGA-LUSC_patients.csv.",
+                "No local RNA sample sheet; file-to-case mapping via GDC API (cached in dataset_deployment/mappings).",
+            ),
+        ),
+    ),
+    "cptac_coad": DatasetConfig(
+        study="cptac_coad",
+        display_name="CPTAC-COAD",
+        stats_dir="data_tcgal_stats/CPTAC-COAD",
+        metadata_csv="datasets_csv/metadata/cptac_coad.csv",
+        clinical_csv="datasets_csv/clinical_data/cptac_coad_clinical.csv",
+        rna_dir="datasets_csv/raw_rna_data/combine/cptac_coad",
+        feature_manifest_csv="datasets_csv/feature_manifests/cptac_coad.csv",
+        split_dir="splits/5foldcv/cptac_coad",
+        workspace_root="SurvPGC_Workspace/cptac_coad",
+        enabled=True,
+        raw=RawDatasetConfig(
+            raw_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad",
+            gene_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad/Bulk_RNA",
+            wsi_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad/cptac_coad/cptac_coad",
+            clinical_jsons=(
+                "/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad/clinical/clinical.cart.2026-10-10.json",
+            ),
+            case_dirs=(
+                "/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad/clinical",
+            ),
+            project_filter=("CPTAC-2",),
+            wsi_glob="*.dcm",
+            wsi_ext=".dcm",
+            notes=(
+                "CPTAC-COAD 结直肠队列（IDC WSI 为 .dcm；RNA 为 GDC CPTAC-2 STAR counts，平铺布局）。",
+                "临床来自 cBioPortal coad_cptac_2019（OS_MONTHS/OS_STATUS/STAGE），已转 GDC 风格 JSON。",
+                "WSI slide->case 由 gdc_sample_sheet.2026-10-10.tsv 提供（slide 文件名为 <uuid>.dcm）。",
+            ),
+        ),
+    ),
+    "cptac_brca": DatasetConfig(
+        study="cptac_brca",
+        display_name="CPTAC-BRCA",
+        stats_dir="data_tcgal_stats/CPTAC-BRCA",
+        metadata_csv="datasets_csv/metadata/cptac_brca.csv",
+        clinical_csv="datasets_csv/clinical_data/cptac_brca_clinical.csv",
+        rna_dir="datasets_csv/raw_rna_data/combine/cptac_brca",
+        feature_manifest_csv="datasets_csv/feature_manifests/cptac_brca.csv",
+        split_dir="splits/5foldcv/cptac_brca",
+        workspace_root="SurvPGC_Workspace/cptac_brca",
+        enabled=True,
+        raw=RawDatasetConfig(
+            raw_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca",
+            gene_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca/Bulk_RNA",
+            wsi_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca/cptac_brca/cptac_brca",
+            clinical_jsons=(
+                "/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca/clinical/clinical.cart.2026-10-10.json",
+            ),
+            case_dirs=(
+                "/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca/clinical",
+            ),
+            project_filter=("CPTAC-2",),
+            wsi_glob="*.dcm",
+            wsi_ext=".dcm",
+            notes=(
+                "CPTAC-BRCA 乳腺癌队列（IDC WSI 为 .dcm；RNA 为 GDC CPTAC-2 STAR counts，平铺布局）。",
+                "临床来自 LinkedOmics survival/meta（OS_days/OS_event/Stage），已转 GDC 风格 JSON。",
+                "注意：死亡事件仅 2/122，生存建模无统计功效（用户已知情，效果差可移除）。",
             ),
         ),
     ),
