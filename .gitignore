@@ -28,3 +28,6 @@ configs/running/
 configs/done_single_multi23_backup
 configs/done_backup
 Modality Ablation/
+# 重新忽略被 !results_display/scripts/** 覆盖的 Python 缓存产物
+__pycache__/
+*.py[cod]
