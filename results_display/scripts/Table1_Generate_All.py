@@ -13,13 +13,15 @@ Pipeline（实验目录 results/Table1_Cindex_Main/<test-dir>/，
 
   2. 论文五表（Table1a_Cindex_Matrix / Table1b_MultiMetric_Summary /
      AppendixS1_IBS_Matrix / AppendixS2_AUC2y_Matrix / AppendixS3_AUC5y_Matrix）：
-     官方口径，5 cohort；Ours 行与本目录树内的官方 mosaic_surv 结果同源。
+     官方口径，主线 7 cohort（BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC）；
+     Ours 行与本目录树内的官方 mosaic_surv 结果同源。
      hgcn 的 IBS/AUC 单元格由第 1 步的前向缓存补齐（其 runner 不落盘
      标准 split_N_results.pkl，离线 nll 链路读不到，故走 Breslow 前向）。
 
-  3. summary 家族（summary.csv / summary_5datasets.csv / baselines+ours
-     的 per-study summary）：同一批结果、同一次运行，8 cohort 全视图，
-     供 FigC/FigD 与 hparam-eval 显示沿用。
+  3. summary 家族（summary.csv / summary_7datasets.csv / baselines+ours
+     的 per-study summary）：同一批结果、同一次运行，
+     summary.csv 为全部数据集视图（10 cohort），summary_7datasets.csv
+     为主线 7 数据集视图，供 FigC/FigD 与 hparam-eval 显示沿用。
 
 用法（项目根目录，SurvPGC conda env）：
   python results_display/scripts/Table1_Generate_All.py                # 默认 --test-dir L0Test

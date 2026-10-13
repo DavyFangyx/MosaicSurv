@@ -35,6 +35,8 @@ STUDY_COLORS = {
     "tcga_kirc": "#7570b3",
     "tcga_kirp": "#e7298a",
     "tcga_lihc": "#66a61e",
+    "tcga_luad": "#a6761d",
+    "tcga_lusc": "#666666",
 }
 PATTERN_LABELS = [pattern.removeprefix("p").replace("_", "/") for pattern in MISSING_PATTERNS]
 MODEL_NAMES = [CFILM_MODEL, "hgcn"]

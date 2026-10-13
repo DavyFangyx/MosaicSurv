@@ -8,7 +8,8 @@ Default outputs:
     results_display/Table2_Modality_Missing_Tset/{study}_model_summary.csv
     results_display/Table2_Modality_Missing_Tset/summary.csv
     results_display/Table2_Modality_Missing_Tset/baseline_ranking.png
-        （5 行数据集 × 8 列（7 测试子集 + MEAN），每格为该 (dataset, subset)
+        （行数 = STUDY_SPECS 数据集数（当前 7：BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC）
+        × 8 列（7 测试子集 + MEAN），每格为该 (dataset, subset)
         下官方模型的 C-index 竖条 + 排名数字；主模型第一红框、胜 hgcn 蓝框）
 
 Models default to the official whitelist (OFFICIAL_MODELS below, same set as
@@ -51,6 +52,9 @@ STUDY_SPECS = [
     ("KIRC", "tcga_kirc"),
     ("KIRP", "tcga_kirp"),
     ("LIHC", "tcga_lihc"),
+    # 主线 7 数据集：原 5 数据集 + LUAD/LUSC（与 Table1 主线 cohort 一致）。
+    ("LUAD", "tcga_luad"),
+    ("LUSC", "tcga_lusc"),
 ]
 
 # 官方 Table2 模型清单（见 configs/z_exp_gen/gen_Table2_missing_modality_baselines.sh
@@ -338,14 +342,15 @@ def parse_mean_std_from_text(value: str) -> tuple[float, float] | None:
 
 def write_ranking_figure(study_dfs: dict[str, pd.DataFrame], output_root: Path) -> Path:
     """baseline_ranking.png：沿用 Cfilm hparam-eval 时代的构图逻辑——
-    5 行数据集 × 8 列（7 个测试子集 + MEAN），每个面板是该 (dataset, subset)
+    每个数据集一行 × 8 列（7 个测试子集 + MEAN），每个面板是该 (dataset, subset)
     下官方模型的 C-index 竖条（固定顺序）+ 排名数字；主模型第一红框、
-    胜过 hgcn 蓝框。
+    胜过 hgcn 蓝框。行数跟随 STUDY_SPECS（当前 7 数据集），行高固定 2.6 英寸。
     """
     models = [model_label(name) for name in OFFICIAL_MODELS]
     figure_subsets = [*SUBSETS, "MEAN"]
+    n_studies = len(STUDY_SPECS)
     fig, axes = plt.subplots(
-        5, 8, figsize=(21, 13), sharey=True, constrained_layout=True
+        n_studies, len(figure_subsets), figsize=(21, 2.6 * n_studies), sharey=True, constrained_layout=True
     )
     for i, (_, study) in enumerate(STUDY_SPECS):
         frame = study_dfs[study]

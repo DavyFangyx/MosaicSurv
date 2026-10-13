@@ -21,12 +21,13 @@ Default input:
     （每个 study 一个运行目录，如 tcga_brca__cell_norm__uni_v1）
 
 Default outputs:
-    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_A_readout_5datasets.csv
-    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_B_training_5datasets.csv
-    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_C_loss_5datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_A_readout_7datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_B_training_7datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_C_loss_7datasets.csv
 
-Every table keeps the classic summary_5datasets.csv row/column layout:
-rows are models, columns are the five datasets plus a mean column. Missing
+Every table keeps the classic summary_7datasets.csv row/column layout:
+rows are models, columns are the seven mainline datasets
+(BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC) plus a mean column. Missing
 experiments are written as `-`, so the script can be re-run while training
 results are still arriving.
 
@@ -70,7 +71,16 @@ GROUP_SPECS = {
     ],
 }
 
-STUDIES = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc"]
+# 主线 7 数据集（与 Table1/Table2 主线 cohort 一致）：原 5 数据集 + LUAD/LUSC。
+STUDIES = [
+    "tcga_brca",
+    "tcga_coad",
+    "tcga_kirc",
+    "tcga_kirp",
+    "tcga_lihc",
+    "tcga_luad",
+    "tcga_lusc",
+]
 
 # 行标签用集中映射的论文正式名（Table4 汇总 CSV）
 MODEL_LABELS = {
@@ -208,7 +218,7 @@ def build_table_frame(
 
 
 def write_table(frame: pd.DataFrame, out_dir: Path, group_key: str) -> None:
-    out_path = out_dir / f"summary_{group_key}_5datasets.csv"
+    out_path = out_dir / f"summary_{group_key}_7datasets.csv"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     frame.to_csv(out_path, index=False)
     print(f"[WRITE] {out_path.relative_to(project_root_from_script())}")
@@ -219,6 +229,8 @@ def clean_legacy_outputs(out_root: Path) -> None:
     the flat files and per-run_id folders under the old
     results_display/Table4_Abaltion_Test/ root (superseded by the
     _Cindex_Main / _Modality_Missing sub-experiment layout).
+    这里的文件名按历史原名逐字匹配（含 `summary_5datasets.csv`），
+    不随主线数据集范围扩大而改名。
     Only called when --clean-legacy is passed explicitly."""
     old_root = out_root.parent
     for name in ("summary.csv", "summary_5datasets.csv"):

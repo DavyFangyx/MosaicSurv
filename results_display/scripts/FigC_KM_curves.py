@@ -54,6 +54,8 @@ STUDY_SPECS = [
     ("KIRC", "tcga_kirc"),
     ("KIRP", "tcga_kirp"),
     ("LIHC", "tcga_lihc"),
+    ("LUAD", "tcga_luad"),
+    ("LUSC", "tcga_lusc"),
     ("PRAD", "tcga_prad"),
     ("READ", "tcga_read"),
 ]
@@ -172,9 +174,9 @@ def ordered_available_study_tokens(experiment_dir: Path) -> list[str]:
     return known + extras
 
 
-# 官方口径 5 cohort（与 Table1 论文表 COHORT_DISPLAY 一致）；
+# 官方口径 7 cohort（与 Table1 论文表 COHORT_DISPLAY 一致）；
 # KICH/PRAD/READ 等扩展数据集不在默认出图范围，可显式 --dataset 指定。
-OFFICIAL_FIGC_STUDY_TOKENS = ["BRCA", "COAD", "KIRC", "KIRP", "LIHC"]
+OFFICIAL_FIGC_STUDY_TOKENS = ["BRCA", "COAD", "KIRC", "KIRP", "LIHC", "LUAD", "LUSC"]
 
 
 def resolve_requested_study_tokens(dataset: str, experiment_dir: Path) -> list[str]:

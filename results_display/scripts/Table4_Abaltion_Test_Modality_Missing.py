@@ -14,9 +14,10 @@ Default input:
 
 Default outputs:
     results_display/Table4_Abaltion_Test/_Modality_Missing/summary_A_readout_missing.csv
-        （Table2 summary 式双层行：(subset, model) x 5 数据集 + mean）
+        （Table2 summary 式双层行：(subset, model) x 7 数据集 + mean）
     results_display/Table4_Abaltion_Test/_Modality_Missing/baseline_ranking.png
-        （5 数据集行 x 8 列（7 子集 + MEAN）的排名图，与 Table2 构图一致）
+        （数据集行数 = len(STUDY_SPECS)（当前 7：BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC）
+        x 8 列（7 子集 + MEAN）的排名图，与 Table2 构图一致）
 
 兄弟实验（_Cindex_Main 子实验，A/B/C 三组完整模态 C-index）见
 Table4_Abaltion_Test_Cindex_Main.py。
@@ -47,6 +48,9 @@ STUDY_SPECS = [
     ("KIRC", "tcga_kirc"),
     ("KIRP", "tcga_kirp"),
     ("LIHC", "tcga_lihc"),
+    # 主线 7 数据集：原 5 数据集 + LUAD/LUSC（与 Table1/Table2 主线 cohort 一致）。
+    ("LUAD", "tcga_luad"),
+    ("LUSC", "tcga_lusc"),
 ]
 
 # A_readout 组（读出层变体）+ 主模型参照；顺序即表格行序
@@ -210,13 +214,18 @@ def write_summary_table(
 def write_ranking_figure(
     study_to_tables: dict[str, dict[str, dict[str, str]]], output_root: Path
 ) -> Path:
-    """baseline_ranking.png：与 Table2 构图一致——5 行数据集 x 8 列
-    （7 个测试子集 + MEAN），每个面板是 A 组模型的 C-index 竖条
+    """baseline_ranking.png：与 Table2 构图一致——每 study 一行数据集（当前 7）
+    x 8 列（7 个测试子集 + MEAN），每个面板是 A 组模型的 C-index 竖条
     （固定顺序）+ 排名数字；主模型第一红框、胜过其余变体均值时蓝框。"""
     models = [display_name(model) for model in A_GROUP_MODELS]
     figure_subsets = [*SUBSETS, "MEAN"]
+    # 行数跟随 STUDY_SPECS（数据集数变化时无需再改这里）；单面板尺寸保持不变。
     fig, axes = plt.subplots(
-        5, 8, figsize=(21, 13), sharey=True, constrained_layout=True
+        len(STUDY_SPECS),
+        len(figure_subsets),
+        figsize=(21, 2.6 * len(STUDY_SPECS)),
+        sharey=True,
+        constrained_layout=True,
     )
     for i, (_, study) in enumerate(STUDY_SPECS):
         table = study_to_tables.get(study, {})

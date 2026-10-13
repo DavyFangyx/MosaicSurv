@@ -1,7 +1,7 @@
 """
 Build the paper tables for Experiment 1 (Table1_Cindex_Main).
 
-Organization (5 cohorts: BRCA/COAD/KIRC/KIRP/LIHC):
+Organization (7 cohorts: BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC):
     Table1a_Cindex_Matrix.csv      c-index full matrix, mean±std per cohort,
                                    Mean C-index + Avg Rank
     Table1b_MultiMetric_Summary.csv  Mean C-index / Mean IBS / 2y AUC / 5y AUC
@@ -71,13 +71,15 @@ from table1_ibs_auc_utils import (
 )
 from model_names import FORMAL_NAMES, MAIN_MODEL
 
-# 5-cohort scope per the current organization
+# 7-cohort scope（主线：原 5 cohort + LUAD/LUSC）
 COHORT_DISPLAY = [
     ("BRCA", "tcga_brca"),
     ("COAD", "tcga_coad"),
     ("KIRC", "tcga_kirc"),
     ("KIRP", "tcga_kirp"),
     ("LIHC", "tcga_lihc"),
+    ("LUAD", "tcga_luad"),
+    ("LUSC", "tcga_lusc"),
 ]
 
 REF_MODEL = FORMAL_NAMES[MAIN_MODEL]  # "Mosaic-Surv (Ours)"；"p vs Ours" 的参照行

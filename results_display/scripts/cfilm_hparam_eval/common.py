@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 本包服务 Cfilm_Hparam_Eval 历史批次（L0Test After fixed modal missing 等遗留目录）；
+# 数据集范围已按主线扩展至 7 个（含 LUAD/LUSC），与现役 Table1-4 口径一致。
+
 import argparse
 import csv
 import math
@@ -8,13 +11,15 @@ from pathlib import Path
 from typing import Iterable
 
 
-STUDIES = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc"]
+STUDIES = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc", "tcga_luad", "tcga_lusc"]
 STUDY_LABELS = {
     "tcga_brca": "BRCA",
     "tcga_coad": "COAD",
     "tcga_kirc": "KIRC",
     "tcga_kirp": "KIRP",
     "tcga_lihc": "LIHC",
+    "tcga_luad": "LUAD",
+    "tcga_lusc": "LUSC",
 }
 SUBSETS = ["P", "C", "G", "PC", "PG", "CG", "PCG"]
 MISSING_SUBSETS = ["C", "P", "G", "PC", "CG", "PG"]

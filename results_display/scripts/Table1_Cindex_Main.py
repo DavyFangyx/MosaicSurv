@@ -33,10 +33,21 @@ STUDY_SPECS = [
     ("KIRC", "tcga_kirc"),
     ("KIRP", "tcga_kirp"),
     ("LIHC", "tcga_lihc"),
+    ("LUAD", "tcga_luad"),
+    ("LUSC", "tcga_lusc"),
     ("PRAD", "tcga_prad"),
     ("READ", "tcga_read"),
 ]
-FIVE_DATASET_STUDIES = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc"]
+# 主线 7 数据集（有 MosaicSurv ours 结果的 cohort）：原 5 数据集 + LUAD/LUSC。
+MAIN_DATASET_STUDIES = [
+    "tcga_brca",
+    "tcga_coad",
+    "tcga_kirc",
+    "tcga_kirp",
+    "tcga_lihc",
+    "tcga_luad",
+    "tcga_lusc",
+]
 
 BASELINE_MODEL_SPECS = [
     # 官方清单（configs/z_exp_gen/Table1_cindex_main/gen_baselines/_common.bash
@@ -503,7 +514,7 @@ def collect_experiment(
     five_dataset_mean_rank_map = build_mean_rank_map(
         combined_text,
         combined_specs,
-        FIVE_DATASET_STUDIES,
+        MAIN_DATASET_STUDIES,
     )
 
     baseline_matrix_df = write_group_outputs(
@@ -532,7 +543,7 @@ def collect_experiment(
     five_dataset_summary_df = build_summary_frame(
         baseline_matrix_df,
         ours_matrix_df,
-        FIVE_DATASET_STUDIES,
+        MAIN_DATASET_STUDIES,
         ours_mean_rank_map=five_dataset_mean_rank_map,
     )
     write_total_summary(
@@ -547,7 +558,7 @@ def collect_experiment(
         output_root,
         group_dir=group_dir,
         output_name=output_name,
-        file_name="summary_5datasets.csv",
+        file_name="summary_7datasets.csv",
     )
 
 

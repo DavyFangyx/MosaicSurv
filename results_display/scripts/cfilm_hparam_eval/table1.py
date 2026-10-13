@@ -25,6 +25,9 @@ DEFAULT_THRESHOLDS = {
     "tcga_kirc": 0.6895,
     "tcga_brca": 0.6588,
     "tcga_lihc": 0.7040,
+    # 肺癌队列小、fold 间方差大，下限取宽松值（与 utils/optuna_utils.py 一致）。
+    "tcga_luad": 0.60,
+    "tcga_lusc": 0.55,
 }
 
 

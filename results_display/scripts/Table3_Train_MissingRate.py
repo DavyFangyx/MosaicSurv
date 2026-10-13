@@ -43,12 +43,16 @@ plt.style.use("seaborn-v0_8-whitegrid")
 GROUP_DIR = "Table3_MissingRate"
 OUTPUT_DIR = "Table3_Train_MissingRate"
 
+# 数据集配色：colorbrewer Dark2 前 7 色（色盲友好），按 STUDY_SPECS 顺序取用；
+# 原 5 数据集沿用 Dark2 前 5 色，LUAD/LUSC 追加 Dark2 第 6/7 色保持同一体系。
 STUDY_SPECS = [
     ("BRCA", "tcga_brca", "#1b9e77"),
     ("COAD", "tcga_coad", "#d95f02"),
     ("KIRC", "tcga_kirc", "#7570b3"),
     ("KIRP", "tcga_kirp", "#e7298a"),
     ("LIHC", "tcga_lihc", "#66a61e"),
+    ("LUAD", "tcga_luad", "#a6761d"),
+    ("LUSC", "tcga_lusc", "#666666"),
 ]
 TEST_SUBSETS = ["P", "C", "G", "PG", "PC", "CG", "PCG"]
 MISSING_PATTERNS = [
@@ -621,7 +625,8 @@ def write_stability_figure(
     figure_dir: Path,
 ) -> Path:
     """Table3 根目录 stability_summary.png：3x3 网格 7 个子图，每个子图是
-    Δ=HCGN−Mosaic-Surv (Ours) 的着色表（行=4 个稳定性指标，列=5 数据集+Mean），
+    Δ=HCGN−Mosaic-Surv (Ours) 的着色表（行=4 个稳定性指标，列=数据集（跟随
+    STUDY_SPECS，当前 7）+Mean），
     Δ>0 绿色、Δ<0 红色（RdYlGn 以 0 为中心），缺失单元格灰底 "-"。
     """
     main_display = MODEL_DISPLAY_NAMES[MAIN_MODEL]
