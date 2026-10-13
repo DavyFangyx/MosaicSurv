@@ -13,8 +13,8 @@
 # 测试 7 子集由 EVAL_MODALITIES=all 共用同一次 5-fold 训练，
 # 不再按测试子集拆成独立训练任务。
 #
-# 结果矩阵：7 个训练配比 x N 个模型 x 7 个测试子集 x 5 个数据集。
-# 训练任务：7 个配比 x N 个模型 x 5 个数据集。
+# 结果矩阵：7 个训练配比 x N 个模型 x 7 个测试子集 x 7 个数据集。
+# 训练任务：7 个配比 x N 个模型 x 7 个数据集。
 #
 # POE 家族只保留主模型 MosaicSurv（其余 B/C 系已注释，降级到 Table4 消融）；
 # MosaicSurv 的公共超参（lr/reg/batch/poe_*）来自 configs/z_exp_gen/mosaic_hparams.sh，
@@ -49,7 +49,7 @@ EXP_GROUP="${EXP_GROUP:-Table3_MissingRate}"
 if [ -n "${STUDIES:-}" ]; then
     read -r -a STUDIES <<< "$STUDIES"
 else
-    STUDIES=(tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc)
+    STUDIES=(tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc tcga_luad tcga_lusc)
 fi
 
 if [ -n "${PRESETS:-}" ]; then

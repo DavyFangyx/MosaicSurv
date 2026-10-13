@@ -18,7 +18,8 @@
 # poe_mmhid / poe_decoder_hidden_dim / poe_encoder_lr_ratio ∈ {0.01, 0.1, 1, 10}。
 # 可显式传 --alphafix（保险，与 12.2 一致）；不要传 --alphapgc，权重由 trial 采样。
 # 数据集顺序与阈值（5-fold mean val C-index 下限）：
-#   kirp 0.8115, coad 0.6611, kirc 0.6895, brca 0.6588, lihc 0.7040
+#   kirp 0.8115, coad 0.6611, kirc 0.6895, brca 0.6588, lihc 0.7040,
+#   luad 0.60, lusc 0.55
 # 阈值在 utils/optuna_utils.py OPTUNA_STUDY_MIN_CINDEX 里面调节
 ''' 
 CUDA_VISIBLE_DEVICES=7 bash bg_tune.sh gpu6_optunaB.log \
@@ -119,7 +120,7 @@ WARMUP_EPOCHS=3
 
 # 每个 trial 按这个顺序跑数据集。路径由 infer_standard_paths 绑定：
 # P/uni_v1、C/L0、G/scFoundation_embedding_cell_norm。不要再写死 LIHC 路径。
-OPTUNA_STUDIES=kirp,coad,kirc,brca,lihc
+OPTUNA_STUDIES=kirp,coad,kirc,brca,lihc,luad,lusc
 
 # 5 折交叉验证
 K=5

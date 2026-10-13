@@ -737,6 +737,7 @@ def _get_split_loader(args, split_dataset, training = False, testing = False, we
         "mosaic_surv_noenum",
         "mosaic_surv_detached",
         "mosaic_surv_nojeffreys",
+        "mosaic_surv_nodropout",
         "modality_concat",
         "mvae_poe",
         "mopoe",

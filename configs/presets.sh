@@ -4,7 +4,7 @@
 #   - 设置 EXTRA_ARGS 数组（追加到命令末尾）
 #   - 设置 RESULTS_SUBDIR（用于对齐 Python 侧真实结果目录）
 
-POE_STAGE1_STUDIES="${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}"
+POE_STAGE1_STUDIES="${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc,luad,lusc}"
 
 format_poe_stage1_studies_tag() {
     local raw_value="$1"

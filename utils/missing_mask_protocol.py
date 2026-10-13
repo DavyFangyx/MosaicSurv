@@ -28,6 +28,7 @@ POE_TRAIN_MODALITIES = {
     "mosaic_surv_noenum",
     "mosaic_surv_detached",
     "mosaic_surv_nojeffreys",
+    "mosaic_surv_nodropout",
 }
 MISSING_MODES = ("model_gen", "unified_mask_csv")
 

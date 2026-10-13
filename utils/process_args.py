@@ -236,6 +236,7 @@ def _process_args():
                             'mosaic_surv_noenum',
                             'mosaic_surv_detached',
                             'mosaic_surv_nojeffreys',
+                            'mosaic_surv_nodropout',
                             'modality_concat',
                             'mvae_poe',
                             'mopoe',
@@ -296,6 +297,7 @@ def _process_args():
         "mosaic_surv_noenum",
         "mosaic_surv_detached",
         "mosaic_surv_nojeffreys",
+        "mosaic_surv_nodropout",
     }:
         args.poe_variant = "C"
 

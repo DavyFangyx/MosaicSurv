@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# [LEGACY] 本目录为 Cfilm 重测批次的历史框架（hparam 清单来自 cfilm_table1_hparams.csv）。
+# 数据集范围已按主线扩展至 7 个（brca/coad/kirc/kirp/lihc/luad/lusc）；
+# 主实验的公共超参仍以 configs/z_exp_gen/mosaic_hparams.sh 为准。
+
 # Generate Table2 missing-modality configs for rows enabled by the T2 column.
 # Baselines stay in results/Table2_Baselines and are not regenerated here.
 
@@ -9,7 +13,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 export HPARAM_CSV="${HPARAM_CSV:-$SCRIPT_DIR/cfilm_table1_hparams.csv}"
 export OUT_DIR="${OUT_DIR:-$REPO_ROOT/configs/queue}"
 export RESULTS_BASE="${RESULTS_BASE:-./results/Cfilm_Hparam_Eval/Table2}"
-export STUDIES="${STUDIES:-tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc}"
+export STUDIES="${STUDIES:-tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc tcga_luad tcga_lusc}"
 export CLINIC_EXPERIMENT="${CLINIC_EXPERIMENT:-L4}"
 export GENE_EXPERIMENT="${GENE_EXPERIMENT:-scFoundation_embedding_gene_raw}"
 export WSI_EXPERIMENT="${WSI_EXPERIMENT:-uni_v1}"

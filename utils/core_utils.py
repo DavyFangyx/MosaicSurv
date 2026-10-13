@@ -1205,6 +1205,7 @@ def _init_model(args, current_fold=None):
         "mosaic_surv_noenum",
         "mosaic_surv_detached",
         "mosaic_surv_nojeffreys",
+        "mosaic_surv_nodropout",
     }:
         if args.modality in POE_NEW_A_MODALITIES:
             args.poe_variant = "A"

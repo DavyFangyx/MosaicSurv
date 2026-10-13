@@ -8,8 +8,8 @@
 # POE 家族只保留主模型 MosaicSurv（其余 B/C 系已注释，降级到 Table4 消融）；
 # MosaicSurv 的公共超参（lr/reg/batch/poe_*）来自 configs/z_exp_gen/mosaic_hparams.sh。
 #
-# 结果矩阵是 7 个测试子集 x N 个方法 x 5 个数据集。
-# 训练任务只有 N 个方法 x 5 个数据集：
+# 结果矩阵是 7 个测试子集 x N 个方法 x 7 个数据集。
+# 训练任务只有 N 个方法 x 7 个数据集：
 # 每个模型只训一次三模态，推理期 7 个子集由 EVAL_MODALITIES=all 共用这次训练。
 # 训练缺失配比开关默认关闭（MISSING_MODE=model_gen），留给 Table3。
 #
@@ -48,7 +48,7 @@ EXP_GROUP="${EXP_GROUP:-Table2_Baselines}"
 if [ -n "${STUDIES:-}" ]; then
     read -r -a STUDIES <<< "$STUDIES"
 else
-    STUDIES=(tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc)
+    STUDIES=(tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc tcga_luad tcga_lusc)
 fi
 
 if [ -n "${PRESETS:-}" ]; then

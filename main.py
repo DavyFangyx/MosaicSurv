@@ -116,7 +116,7 @@ def main(args):
     })
 
     if len(folds) != args.k:
-        save_name = 'test_result_partial_{}_{}.csv'.format(start, end)
+        save_name = 'test_result_partial_{}_{}.csv'.format(folds[0], folds[-1])
     else:
         save_name = 'test_result.csv'
         

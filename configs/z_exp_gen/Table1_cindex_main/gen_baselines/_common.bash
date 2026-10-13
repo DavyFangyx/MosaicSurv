@@ -13,6 +13,8 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   bash configs/z_exp_gen/Table1_cindex_main/gen_baselines/gen_tcga_kirc_full_model_val.sh
   bash configs/z_exp_gen/Table1_cindex_main/gen_baselines/gen_tcga_kirp_full_model_val.sh
   bash configs/z_exp_gen/Table1_cindex_main/gen_baselines/gen_tcga_lihc_full_model_val.sh
+  bash configs/z_exp_gen/Table1_cindex_main/gen_baselines/gen_tcga_luad_full_model_val.sh
+  bash configs/z_exp_gen/Table1_cindex_main/gen_baselines/gen_tcga_lusc_full_model_val.sh
   bash configs/z_exp_gen/Table1_cindex_main/gen_baselines/gen_tcga_prad_full_model_val.sh
   bash configs/z_exp_gen/Table1_cindex_main/gen_baselines/gen_tcga_read_full_model_val.sh
 EOF

@@ -18,6 +18,10 @@ OPTUNA_STUDY_MIN_CINDEX = {
     "tcga_kirc": 0.6895,
     "tcga_brca": 0.6588,
     "tcga_lihc": 0.7040,
+    # 肺癌队列小、fold 间方差大（LUAD 0.81±0.12 / LUSC 0.74±0.09），
+    # 下限取宽松值，避免误剪好 trial。
+    "tcga_luad": 0.60,
+    "tcga_lusc": 0.55,
 }
 
 

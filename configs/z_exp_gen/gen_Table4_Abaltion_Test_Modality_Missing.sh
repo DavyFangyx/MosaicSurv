@@ -24,7 +24,7 @@ EXP_GROUP="${EXP_GROUP:-Table4_Abaltion_Test/_Modality_Missing}"
 if [ -n "${STUDIES:-}" ]; then
     read -r -a studies <<< "$STUDIES"
 else
-    studies=(tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc)
+    studies=(tcga_brca tcga_coad tcga_kirc tcga_kirp tcga_lihc tcga_luad tcga_lusc)
 fi
 
 if [ -n "${PRESETS:-}" ]; then

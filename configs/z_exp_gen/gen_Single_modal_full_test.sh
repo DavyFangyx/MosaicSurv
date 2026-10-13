@@ -1,10 +1,10 @@
 #!/bin/bash
 # configs/z_exp_gen/gen_Single_modal_full_test.sh
-# 基于严格筛选后的 split 结果，生成 8 个可用数据集的全部单模态基线配置。
+# 基于严格筛选后的 split 结果，生成全部可用数据集的单模态基线配置。
 #
 # 规则：
 # - 仅使用 splits/5foldcv/汇总.csv 中 status=ok 且 eligible_cases>0 的数据集
-# - 当前等价于 8 个数据集（排除 tcga_stad）
+# - 当前等价于 10 个数据集（排除 tcga_stad，含 LUAD/LUSC）
 # - 单模态按 3 个模态展开：
 #   - WSI
 #   - Gene

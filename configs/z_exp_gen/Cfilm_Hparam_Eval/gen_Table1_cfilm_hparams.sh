@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+# [LEGACY] 本目录为 Cfilm 重测批次的历史框架（hparam 清单来自 cfilm_table1_hparams.csv）。
+# 数据集范围已按主线扩展至 7 个（brca/coad/kirc/kirp/lihc/luad/lusc）；
+# 主实验的公共超参仍以 configs/z_exp_gen/mosaic_hparams.sh 为准。
+
 # Table1 Cfilm-only hyperparam rerun.
 # Reads rows enabled by the T1 manifest column and writes
 # only survtri_poe_vae_C_film configs. Does not touch gen_ours.sh.
@@ -45,7 +49,7 @@ warmup_epochs = os.environ["WARMUP_EPOCHS"]
 batch_size_stage1 = os.environ["BATCH_SIZE_STAGE1"]
 expected_rows = int(os.environ["EXPECTED_HPARAM_ROWS"])
 preset = "survtri_poe_vae_C_film"
-studies = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc"]
+studies = ["tcga_brca", "tcga_coad", "tcga_kirc", "tcga_kirp", "tcga_lihc", "tcga_luad", "tcga_lusc"]
 
 out_dir.mkdir(parents=True, exist_ok=True)
 

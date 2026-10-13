@@ -15,6 +15,8 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   bash configs/z_exp_gen/Table4_Abaltion_Test/gen_tcga_kirc_ablation_test.sh
   bash configs/z_exp_gen/Table4_Abaltion_Test/gen_tcga_kirp_ablation_test.sh
   bash configs/z_exp_gen/Table4_Abaltion_Test/gen_tcga_lihc_ablation_test.sh
+  bash configs/z_exp_gen/Table4_Abaltion_Test/gen_tcga_luad_ablation_test.sh
+  bash configs/z_exp_gen/Table4_Abaltion_Test/gen_tcga_lusc_ablation_test.sh
   bash configs/z_exp_gen/Table4_Abaltion_Test/gen_tcga_prad_ablation_test.sh
   bash configs/z_exp_gen/Table4_Abaltion_Test/gen_tcga_read_ablation_test.sh
 EOF
@@ -65,7 +67,7 @@ generate_table4_ablation_test_configs() {
     batch_size="${MOSAIC_BATCH_SIZE}"
     max_epochs="${MAX_EPOCHS:-20}"
     warmup_epochs="${WARMUP_EPOCHS:-3}"
-    stage1_pool="${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}"
+    stage1_pool="${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc,luad,lusc}"
     stage1_pool_tag=" $(normalize_stage1_pool_tag "$stage1_pool" | tr '\n' ' ') "
 
     case "$gene_experiment" in
@@ -167,7 +169,7 @@ POE_MMHID=$MOSAIC_POE_MMHID
 ALPHAFIX=$MOSAIC_ALPHAFIX
 ALPHAPGC=$MOSAIC_ALPHAPGC
 BETAFIX=$MOSAIC_BETAFIX
-POE_STAGE1_STUDIES=${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc}
+POE_STAGE1_STUDIES=${POE_STAGE1_STUDIES:-brca,coad,kirc,kirp,lihc,luad,lusc}
 EOF
 )"
     done
