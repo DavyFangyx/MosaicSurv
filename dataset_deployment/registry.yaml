@@ -99,6 +99,7 @@ datasets:
     feature_manifest_csv: datasets_csv/feature_manifests/cptac_coad.csv
     split_dir: splits/5foldcv/cptac_coad
     workspace_root: SurvPGC_Workspace/cptac_coad
+    split_mode: external_test
     enabled: true
   cptac_brca:
     display_name: CPTAC-BRCA
@@ -110,6 +111,7 @@ datasets:
     feature_manifest_csv: datasets_csv/feature_manifests/cptac_brca.csv
     split_dir: splits/5foldcv/cptac_brca
     workspace_root: SurvPGC_Workspace/cptac_brca
+    split_mode: external_test
     enabled: true
   tcga_prad:
     display_name: TCGA-PRAD

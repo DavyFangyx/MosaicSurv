@@ -49,7 +49,7 @@ def resolve_study_name(study: str) -> str:
     study = str(study).strip()
     if not study:
         raise ValueError("study is required")
-    if not study.startswith("tcga_"):
+    if not study.startswith(("tcga_", "cptac_")):
         study = f"tcga_{study}"
     return study
 

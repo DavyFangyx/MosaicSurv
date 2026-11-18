@@ -6,9 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 QUEUE_DIR="${1:-configs/queue}"
-RUNNING_DIR="configs/running"
-DONE_DIR="configs/done"
-FAIL_DIR="configs/failed"
+# 支持为不同表征/实验批次指定独立的中间目录，避免与旧批次的同名 config 互踩。
+RUNNING_DIR="${RUNNING_DIR:-configs/running}"
+DONE_DIR="${DONE_DIR:-configs/done}"
+FAIL_DIR="${FAIL_DIR:-configs/failed}"
 mkdir -p "$QUEUE_DIR" "$RUNNING_DIR" "$DONE_DIR" "$FAIL_DIR"
 
 echo "============================================================"

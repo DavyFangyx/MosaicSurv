@@ -1,8 +1,9 @@
 """
-Collect Table 4（_Modality_Missing 子实验）A_readout 组缺失模态消融汇总。
+Collect Table 4（_Modality_Missing 子实验）A1/A2 单因素消融汇总。
 
-A_readout 组（读出层变体：mosaic_surv / _single / _single_enum / _noenum /
-_multi）的设计动机是缺失模态推理，因此本子实验采用 Table2 式的缺失模态
+A 组按 A1 读出头（mosaic_surv / _single_enum / _multi）和 A2 训练增强
+（mosaic_surv / _noenum / _nodropout）分别组织，每个子表共享主模型
+mosaic_surv 作同批次参照，共五个不同模型。本子实验采用 Table2 式的缺失模态
 评测（EVAL_MODALITIES=all + MISSING_MODE=model_gen：每个模型只训一次
 三模态，推理期生成缺失模态并跑 7 个子集 eval）。协议与 Table2 对齐
 （L0 / gene_raw / uni_v1），主模型同批次重跑作参照。
@@ -13,9 +14,11 @@ Default input:
         （PCG 回退 {model}/test_result.csv）
 
 Default outputs:
-    results_display/Table4_Abaltion_Test/_Modality_Missing/summary_A_readout_missing.csv
+    results_display/Table4_Abaltion_Test/_Modality_Missing/summary_A1_head_missing.csv
+    results_display/Table4_Abaltion_Test/_Modality_Missing/summary_A2_augmentation_missing.csv
         （Table2 summary 式双层行：(subset, model) x 7 数据集 + mean）
-    results_display/Table4_Abaltion_Test/_Modality_Missing/baseline_ranking.png
+    results_display/Table4_Abaltion_Test/_Modality_Missing/baseline_ranking_A1_head.png
+    results_display/Table4_Abaltion_Test/_Modality_Missing/baseline_ranking_A2_augmentation.png
         （数据集行数 = len(STUDY_SPECS)（当前 7：BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC）
         x 8 列（7 子集 + MEAN）的排名图，与 Table2 构图一致）
 
@@ -27,8 +30,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import math
 import re
+import shutil
 from pathlib import Path
 
 import matplotlib
@@ -53,21 +58,32 @@ STUDY_SPECS = [
     ("LUSC", "tcga_lusc"),
 ]
 
-# A_readout 组（读出层变体）+ 主模型参照；顺序即表格行序
-A_GROUP_MODELS = [
-    "mosaic_surv",
-    "mosaic_surv_single",
-    "mosaic_surv_single_enum",
-    "mosaic_surv_noenum",
-    "mosaic_surv_nodropout",
-    "mosaic_surv_multi",
-]
+# A1 读出头、A2 训练增强，各自与主模型组成一张单因素对照表；顺序即表格行序。
+A_GROUPS = {
+    "A1_head": [
+        "mosaic_surv",
+        "mosaic_surv_single_enum",
+        "mosaic_surv_multi",
+    ],
+    "A2_augmentation": [
+        "mosaic_surv",
+        "mosaic_surv_noenum",
+        "mosaic_surv_nodropout",
+    ],
+}
+ALL_MODELS = list(dict.fromkeys(
+    model for models in A_GROUPS.values() for model in models
+))
+
+GROUP_TITLES = {
+    "A1_head": "A1: head structure",
+    "A2_augmentation": "A2: training augmentation",
+}
 
 SUBSETS = ["P", "C", "G", "PC", "PG", "CG", "PCG"]
 
 MODEL_COLORS = {
     "Mosaic-Surv (Ours)": "#d62728",
-    "Mosaic-Surv w/ Single Head": "#1f77b4",
     "Mosaic-Surv w/ Single Head + Enumeration": "#2ca02c",
     "Mosaic-Surv w/o Pattern Enumeration": "#ff7f0e",
     "Mosaic-Surv w/o Train-Time Modality Dropout": "#8c564b",
@@ -138,12 +154,12 @@ def subset_csv_path(model_dir: Path, subset: str) -> Path | None:
     return None
 
 
-def collect_group(results_root: Path) -> dict[str, dict[str, dict[str, str]]]:
+def collect_group(results_root: Path, group_dir: str = GROUP_DIR) -> dict[str, dict[str, dict[str, str]]]:
     """study -> subset -> model -> 'mean ± std' 文本。"""
-    results_dir = results_root / GROUP_DIR
+    results_dir = results_root / group_dir
     if not results_dir.is_dir():
         print(f"[WARN] Missing results directory: {results_dir} (training not started?)")
-        return {study: {subset: {display_name(model): "-" for model in A_GROUP_MODELS} for subset in SUBSETS} for _, study in STUDY_SPECS}
+        return {study: {subset: {display_name(model): "-" for model in ALL_MODELS} for subset in SUBSETS} for _, study in STUDY_SPECS}
 
     study_to_tables: dict[str, dict[str, dict[str, str]]] = {}
     for _, study in STUDY_SPECS:
@@ -159,7 +175,7 @@ def collect_group(results_root: Path) -> dict[str, dict[str, dict[str, str]]]:
                 f"{[path.name for path in run_dirs]}; using {run_dirs[0].name}"
             )
         run_dir = run_dirs[0]
-        for model in A_GROUP_MODELS:
+        for model in ALL_MODELS:
             model_dir = run_dir / model
             if not model_dir.is_dir():
                 print(f"[WARN] Missing model directory: {model_dir}")
@@ -181,43 +197,62 @@ def collect_group(results_root: Path) -> dict[str, dict[str, dict[str, str]]]:
 
 def write_summary_table(
     study_to_tables: dict[str, dict[str, dict[str, str]]], output_root: Path
-) -> Path:
+) -> list[Path]:
     studies = [study for _, study in STUDY_SPECS]
-    model_labels = [display_name(model) for model in A_GROUP_MODELS]
-    rows: list[list[str]] = []
-    for subset in SUBSETS:
-        for model in model_labels:
-            row = [subset, model]
-            means: list[float] = []
-            for study in studies:
-                text = study_to_tables.get(study, {}).get(subset, {}).get(model, "-")
-                parsed = parse_mean_std_from_text(text)
-                if parsed is not None:
-                    means.append(parsed[0])
-                row.append(text)
-            row.append(
-                f"{sum(means) / len(means):.4f}" if means else "-"
-            )
-            rows.append(row)
-
     out_dir = output_root / DISPLAY_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "summary_A_readout_missing.csv"
-    with out_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(["subset", "model", *studies, "mean"])
-        writer.writerows(rows)
-    print(f"[WRITE] {out_path.relative_to(output_root)}")
-    return out_path
+    out_paths: list[Path] = []
+    for group_key, group_models in A_GROUPS.items():
+        model_labels = [display_name(model) for model in group_models]
+        rows: list[list[str]] = []
+        for subset in SUBSETS:
+            for model in model_labels:
+                row = [subset, model]
+                means: list[float] = []
+                for study in studies:
+                    text = study_to_tables.get(study, {}).get(subset, {}).get(model, "-")
+                    parsed = parse_mean_std_from_text(text)
+                    if parsed is not None:
+                        means.append(parsed[0])
+                    row.append(text)
+                row.append(
+                    f"{sum(means) / len(means):.4f}" if means else "-"
+                )
+                rows.append(row)
+
+        out_path = out_dir / f"summary_{group_key}_missing.csv"
+        with out_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["subset", "model", *studies, "mean"])
+            writer.writerows(rows)
+        print(f"[WRITE] {out_path.relative_to(output_root)}")
+        out_paths.append(out_path)
+    return out_paths
 
 
 def write_ranking_figure(
     study_to_tables: dict[str, dict[str, dict[str, str]]], output_root: Path
+) -> list[Path]:
+    out_paths: list[Path] = []
+    for group_key, group_models in A_GROUPS.items():
+        out_paths.append(
+            _write_group_ranking_figure(
+                study_to_tables, output_root, group_key, group_models
+            )
+        )
+    return out_paths
+
+
+def _write_group_ranking_figure(
+    study_to_tables: dict[str, dict[str, dict[str, str]]],
+    output_root: Path,
+    group_key: str,
+    group_models: list[str],
 ) -> Path:
-    """baseline_ranking.png：与 Table2 构图一致——每 study 一行数据集（当前 7）
-    x 8 列（7 个测试子集 + MEAN），每个面板是 A 组模型的 C-index 竖条
+    """与 Table2 构图一致——每 study 一行数据集（当前 7）
+    x 8 列（7 个测试子集 + MEAN），每个面板是该单因素组的 C-index 竖条
     （固定顺序）+ 排名数字；主模型第一红框、胜过其余变体均值时蓝框。"""
-    models = [display_name(model) for model in A_GROUP_MODELS]
+    models = [display_name(model) for model in group_models]
     figure_subsets = [*SUBSETS, "MEAN"]
     # 行数跟随 STUDY_SPECS（数据集数变化时无需再改这里）；单面板尺寸保持不变。
     fig, axes = plt.subplots(
@@ -226,6 +261,11 @@ def write_ranking_figure(
         figsize=(21, 2.6 * len(STUDY_SPECS)),
         sharey=True,
         constrained_layout=True,
+    )
+    fig.suptitle(
+        GROUP_TITLES.get(group_key, group_key),
+        fontsize=12,
+        fontweight="bold",
     )
     for i, (_, study) in enumerate(STUDY_SPECS):
         table = study_to_tables.get(study, {})
@@ -312,11 +352,38 @@ def write_ranking_figure(
 
     out_dir = output_root / DISPLAY_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "baseline_ranking.png"
+    out_path = out_dir / f"baseline_ranking_{group_key}.png"
     fig.savefig(out_path, dpi=220, facecolor="white", bbox_inches="tight")
     plt.close(fig)
     print(f"[WRITE] {out_path.relative_to(output_root)}")
     return out_path
+
+
+def archive_path(path: Path) -> None:
+    """Move a legacy display output to AnysoleWorkspace/_trash/<date>/.
+    Project rule: never delete; archive and list for confirmation."""
+    project_root = project_root_from_script()
+    trash_root = (
+        project_root / "AnysoleWorkspace" / "_trash" / datetime.date.today().isoformat()
+    )
+    try:
+        relative = path.relative_to(project_root)
+    except ValueError:
+        relative = Path(path.name)
+    target = trash_root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(path), str(target))
+    print(f"[ARCHIVE] {path} -> {target}")
+
+
+def clean_legacy_outputs(output_root: Path) -> None:
+    """Archive the superseded combined A_readout summary/ranking outputs.
+    Only called when --clean-legacy is passed explicitly."""
+    out_dir = output_root / DISPLAY_DIR
+    for name in ("summary_A_readout_missing.csv", "baseline_ranking.png"):
+        path = out_dir / name
+        if path.exists():
+            archive_path(path)
 
 
 def main() -> None:
@@ -336,9 +403,25 @@ def main() -> None:
         default=project_root / "results_display",
         help="Root output directory",
     )
+    parser.add_argument(
+        "--group-dir",
+        default=GROUP_DIR,
+        help="Grouped results directory name (e.g. Table4_Abaltion_Test_L1/_Modality_Missing)",
+    )
+    parser.add_argument(
+        "--clean-legacy",
+        action="store_true",
+        help=(
+            "Delete the superseded combined A_readout summary/ranking outputs "
+            "before writing the split A1/A2 outputs"
+        ),
+    )
     args = parser.parse_args()
 
-    study_to_tables = collect_group(args.results_root)
+    if args.clean_legacy:
+        clean_legacy_outputs(args.output_root)
+
+    study_to_tables = collect_group(args.results_root, args.group_dir)
     write_summary_table(study_to_tables, args.output_root)
     write_ranking_figure(study_to_tables, args.output_root)
     print("Done.")

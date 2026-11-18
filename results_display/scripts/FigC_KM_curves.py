@@ -4,6 +4,8 @@
 （偏似然对平移不变），全局切分会把 HR 向 1 衰减，因此每折在各自中位数处二分后合并。
 
 Example:
+conda activate SurvPGC
+
 python results_display/scripts/FigC_KM_curves.py \
     --test-dir L0Test \
     --dataset BRCA \

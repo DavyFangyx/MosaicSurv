@@ -67,11 +67,15 @@ ALL_FOLDS = (0, 1, 2, 3, 4)
 DEFAULT_LEGACY_COX_DIRS = ""
 
 
-def cox_cache_path(project_root: Path, test_dir: str) -> Path:
+def cox_cache_path(
+    project_root: Path,
+    test_dir: str,
+    output_root: Path | None = None,
+) -> Path:
     safe = re.sub(r"[^\w.-]+", "_", test_dir)
+    display_root = Path(output_root) if output_root is not None else project_root / "results_display"
     return (
-        project_root
-        / "results_display"
+        display_root
         / ".cache_table1"
         / f"cox_ibs_auc_folds__{safe}.csv"
     )
@@ -137,9 +141,10 @@ def ensure_cox_cache(
     layer_dir: str,
     gpu: int,
     folds: list[int],
+    output_root: Path | None = None,
 ) -> Path:
     """为缺缓存的 cox 模型目录补算 Breslow 前向 IBS/AUC（幂等）。"""
-    cache_path = cox_cache_path(project_root, test_dir)
+    cache_path = cox_cache_path(project_root, test_dir, output_root)
     shared_path = project_root / "results_display" / LEGACY_COX_CACHE_CSV
     coverage = load_cache_coverage(cache_path, shared_path)
 
@@ -198,6 +203,7 @@ def run_experiment(args: argparse.Namespace, project_root: Path, test_dir: str) 
             layer_dir=layer_dir,
             gpu=args.gpu,
             folds=folds,
+            output_root=output_root,
         )
 
     # ---- 2. 论文五表（官方口径；Ours 来自本目录树内同批次的 mosaic_surv）
@@ -209,7 +215,7 @@ def run_experiment(args: argparse.Namespace, project_root: Path, test_dir: str) 
         test_dir=test_dir,
         layer_dir=layer_dir,
         with_cox_cache=True,
-        cox_cache_csv=cox_cache_path(project_root, test_dir),
+        cox_cache_csv=cox_cache_path(project_root, test_dir, output_root),
         cox_shared_fallback=test_dir in args.cox_cache_dirs,
     )
 

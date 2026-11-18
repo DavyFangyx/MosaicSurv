@@ -1,56 +1,31 @@
-**Table1 KM Curves (FigC)**
+# FigC：生存风险分层评估
 
-## Summary
+## 实验目的与比较对象
 
-对 `results/Table1_Cindex_Main` 下指定实验组和数据集的全部模型绘制 Kaplan-Meier 曲线。不重跑 `.pt`，只读取已有 5-fold OOF 预测 `split_{k}_results.pkl`，按风险中位数分成 High/Low，输出单模型图和一张全部模型大拼图。
+检验模型输出的生存风险能否将患者划分为预后不同的两组。比较对象与 Table1 相同，包含六个单模态、五个双模态、两个三模态对照和 MosaicSurv，共14个模型；覆盖七个主线 TCGA 队列。
 
-```bash
-python results_display/scripts/FigC_KM_curves.py \
-  --test-dir "L0Test After fixed modal missing" \
-  --dataset BRCA
+每个模型分别建立 High-risk 与 Low-risk 两组。这里的组间对照是同一模型划分的高、低风险患者，不是把不同模型的预测分数直接拼接比较。
 
-python results_display/scripts/FigC_KM_curves.py \
-  --test-dir "L0Test After fixed modal missing" \
-  --dataset all \
-  --time-unit year
-```
+## 分组与控制条件
 
-## Data And Split
+使用每名患者所在测试折的预测风险。先在每个折内取风险中位数，风险不低于该折中位数的患者归入 High-risk，其余归入 Low-risk，再合并五折的分组。
 
-- 结果根目录：`results/Table1_Cindex_Main/{test-dir}`
-- 扫描 `{Lx}_{STUDY}_full_model_val` 与 `{Lx}_{STUDY}_poe_model_val` 下全部 `test_result.csv`，再读同目录 `split_{0-4}_results.pkl`
-- 模型命名与 Table1 一致：baseline 用目录名，Ours 归一化为 `B` / `B_single` / `C_film` 等
-- 合并 5 个互斥 test fold 的 OOF 预测；`event = 1 - censorship`；丢掉 NaN risk 和 `time <= 0`
-- 按合并后 risk 中位数二分：High `risk >= median`（红 `#d62728`），Low `risk < median`（绿 `#2ca02c`）
-- 中位数并列分到 High；若风险全相同或某一组为空，跳过该模型并 warning
+各折风险尺度可能不同，因此不在合并后的所有风险上使用一个统一阈值。各模型使用相同患者划分、生存终点、随访时间单位及删失定义；生存事件为死亡，删失患者保留其有效随访时间。
 
-## Plot Spec
+## 评估指标
 
-- 单模型图：KM 阶梯曲线、删失刻度、左上角图例 `Low risk (n=...)` / `High risk (n=...)`、图内标注 log-rank `p-value`
-- 大拼图：该实验组-数据集下全部成功模型，按 Table1 类型顺序 `P, C, G, P+C, P+G, C+G, P+C+G, Ours`
-- 拼图共享左上角绿/红图例；每个子图保留模型标题和 p-value
-- KM 与两样本 log-rank 用 numpy/scipy 实现，不依赖 `lifelines`
-- KM 曲线叠加 Greenwood 95% CI 半透明带；单模型图和大拼图都画
-- 时间轴：pkl 内存的是月；`--time-unit month` 原样显示，`year` 将横坐标除以 12
+| 指标 | 定义与解释 |
+|---|---|
+| Kaplan–Meier 曲线 | 分别估计高、低风险组的生存函数，附 Greenwood 95%置信区间和删失标记 |
+| Log-rank p | 检验同一模型所划分的两组生存分布是否存在差异 |
+| HR及95% CI | 以 Low-risk 为参照，用单变量 Cox 模型估计 High-risk 的风险比；并列事件时间采用 Efron 处理 |
+| Cox Wald p | 对高、低风险组对应的 Cox 回归系数进行检验 |
+| 组内人数与事件数 | 报告两组样本及事件支持，识别极端分组和不可估风险比 |
 
-## Outputs
+HR 大于1表示高风险组死亡风险较高，CI跨1表示该估计未排除无差异。组间曲线分离、HR与p值共同用于描述风险分层，不能仅凭图形判断模型间优劣。
 
-`results_display/FigC_KM_curves/{test-dir}/{dataset}/`
+## 解释边界
 
-- `per_model/{model}.png`
-- `all_models.png`
-- `all_models.pdf`
-- `km_stats.csv`：`model_type, model, n, n_low, n_high, events_low, events_high, median_risk, logrank_p`
+该实验使用折内测试风险中位数，是内部队列的风险分层评估；它不等同于外部部署时预先固定阈值。外部队列的源训练阈值与多数票分组另由 EVE2 评估。
 
-## CLI
-
-| Flag | Default | Meaning |
-| --- | --- | --- |
-| `--test-dir` | required | 实验组文件夹名，例如 `L0Test After fixed modal missing` |
-| `--dataset` | required | `BRCA`、`tcga_brca`，或 `all` 扫描该实验组下实际存在的全部数据集 |
-| `--time-unit` | `month` | `month` 或 `year`。pkl 内存的是月；`year` 把横坐标除以 12 |
-| `--group-dir` | `Table1_Cindex_Main` | 结果大组 |
-| `--results-root` | `results` | 结果根目录 |
-| `--output-root` | `results_display/FigC_KM_curves` | 输出根目录 |
-
-未知 `--test-dir` / `--dataset` 直接报错并列出可用项。缺 pkl 或退化分组只跳过该模型，不中断整次运行。
+组内事件不足、所有风险相同或某组为空时，相关统计量应标为不可估，并报告对应人数，不构造替代患者或风险。已有验证/测试重合限制随 Table1 一并披露。

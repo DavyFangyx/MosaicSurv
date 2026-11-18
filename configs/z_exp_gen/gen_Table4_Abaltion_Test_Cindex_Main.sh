@@ -12,6 +12,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # 兄弟实验（_Modality_Missing 子实验，仅 A 组、Table2 式缺失模态评测）见
 # gen_Table4_Abaltion_Test_Modality_Missing.sh。
 
-export EXP_GROUP="Table4_Abaltion_Test/_Cindex_Main"
+# 允许外部覆盖实验组：L1 临床编码等换表征批次必须写入独立目录，
+# 否则 RUN_NAME 不含 clinic_experiment，会与 L0 结果及 stage1 cache 互踩。
+export EXP_GROUP="${EXP_GROUP:-Table4_Abaltion_Test/_Cindex_Main}"
 
 bash "$SCRIPT_DIR/Table4_Abaltion_Test/gen_ablation_test.sh"

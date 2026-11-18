@@ -34,7 +34,7 @@ Table4_Abaltion_Test/<study>__cell_norm__<wsi>（单组方案，无 run_id 后�
 Example:
 conda activate SurvPGC
 python results_display/scripts/FigD_Generated_Heatmaps.py \
-    --dataset LIHC \
+    --dataset all \
     --fold 0 \
     --poe-model mosaic_surv \
     --eval-subset P,PC,PG,C,G\
@@ -101,6 +101,8 @@ STUDY_SPECS = {
     "PRAD": "tcga_prad",
     "STAD": "tcga_stad",
 }
+# --dataset all 展开的官方 7 数据集（与 FigC OFFICIAL_FIGC_STUDY_TOKENS 一致）
+OFFICIAL_STUDY_TOKENS = ["BRCA", "COAD", "KIRC", "KIRP", "LIHC", "LUAD", "LUSC"]
 CANVAS_BG = (255, 255, 255)
 TITLE_COLOR = (20, 20, 20)
 ACCENT_COLOR = (40, 40, 40)
@@ -535,8 +537,9 @@ def comparison_stem(modality):
     return f"{modality}_vs_{modality}p"
 
 
-def main():
-    args = parse_args()
+def main(args=None):
+    if args is None:
+        args = parse_args()
     study, display = resolve_study(args)
     poe_model_name = normalize_poe_model(args.poe_model)
     subsets = parse_eval_subsets(args.eval_subset)
@@ -736,4 +739,21 @@ def main():
 
 if __name__ == "__main__":
     os.chdir(PROJECT_ROOT)
-    main()
+    args = parse_args()
+    if str(args.dataset).strip().lower() in {"all", "*"}:
+        print(f"[PLAN] datasets: {', '.join(OFFICIAL_STUDY_TOKENS)}")
+        ok, failed = [], []
+        for token in OFFICIAL_STUDY_TOKENS:
+            print(f"[DATASET] {token}", flush=True)
+            sub = argparse.Namespace(**vars(args))
+            sub.dataset = token
+            sub.study = ""
+            try:
+                main(sub)
+                ok.append(token)
+            except Exception as exc:
+                failed.append(token)
+                print(f"[ERROR] dataset {token} failed: {exc}")
+        print(f"[summary] ok={len(ok)}/{len(OFFICIAL_STUDY_TOKENS)} failed={failed or 'none'}")
+        sys.exit(1 if failed else 0)
+    main(args)

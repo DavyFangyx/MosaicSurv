@@ -470,6 +470,8 @@ def _build_survival_dataset_factory(args):
         data_dir=args.data_root_dir,
         clinical_file=args.clinical_file,
         seed=args.seed,
+        bins_override=getattr(args, "bins_override", None),
+        allow_missing_files=getattr(args, "allow_missing_modality_files", False),
         print_info=True,
         n_bins=args.n_classes,
         label_col=args.label_col,
@@ -2342,10 +2344,17 @@ def _summary(args, dataset_factory, model, modality, loader, loss_fn, survival_t
     all_event_times = np.concatenate(all_event_times, axis=0)
     all_logits = np.concatenate(all_logits, axis=0)
     
+    # slide_id -> case_id 映射：TCGA 条码走 [:12] 前缀与 metadata 等价；
+    # 外部队列（如 CPTAC 的 <uuid>.dcm slide_id）必须经 metadata 查表。
+    slide_to_case = {}
+    meta_df = getattr(loader.dataset, "metadata", None)
+    if meta_df is not None and "case_id" in meta_df.columns and "slide_id" in meta_df.columns:
+        slide_to_case = dict(zip(meta_df["slide_id"].astype(str), meta_df["case_id"].astype(str)))
+
     patient_results = {}
     for i in range(len(all_slide_ids)):
-        slide_id = slide_ids.values[i]
-        case_id = slide_id[:12]
+        slide_id = str(slide_ids.values[i])
+        case_id = slide_to_case.get(slide_id, slide_id[:12])
         patient_results[case_id] = {}
         patient_results[case_id]["time"] = all_event_times[i]
         patient_results[case_id]["risk"] = all_risk_scores[i]

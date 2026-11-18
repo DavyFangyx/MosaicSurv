@@ -13,7 +13,7 @@
 | **基线**（Test1） | `abmil_wsi`、`mlp_wsi`、`transmil_wsi`、`mlp/snn_clinic_mean/flatten`、`clinic_cox`、`mlp_gene`、`snn_gene`、`survpc_f`、`porpoise`、`survpath`、`mcat`、`survgc_f`、`survpgc_f` | 仅 Test1 | defaults + 脚本默认，与 MosaicSurv 无关 |
 | **基线**（Test2） | `modality_concat_zero`、`modality_concat_mean`、`mvae_poe`、`mopoe`、`hgcn` | 仅 Test2 | 同上（hgcn 的 batch 由 presets.sh 硬绑 32） |
 | **基线**（Test3） | `hgcn` | 仅 Test3 | 同上 |
-| **消融**（仅 Table4） | `mosaic_surv_single`、`mosaic_surv_single_enum`、`mosaic_surv_noenum`、`mosaic_surv_multi`、`mosaic_surv_twostage`、`mosaic_surv_frozen`、`mosaic_surv_kl`、`mosaic_surv_nojeffreys`、`mosaic_surv_detached` | 仅 Test4 | `mosaic_hparams.sh` 全套 10 键（消融维度例外见 Test4 节） |
+| **消融**（仅 Table4） | `mosaic_surv_single_enum`、`mosaic_surv_multi`、`mosaic_surv_noenum`、`mosaic_surv_nodropout`、`mosaic_surv_twostage`、`mosaic_surv_frozen`、`mosaic_surv_kl`、`mosaic_surv_nojeffreys`、`mosaic_surv_detached` | 仅 Test4 | `mosaic_hparams.sh` 全套 10 键（消融维度例外见 Test4 节） |
 
 POE 家族其余成员（`survtri_poe_vae_A`、`B`、`C`、`B_single`、`B_multi` 等）
 在主表 Test1-3 中全部注释不用，不作为基线出现在任何主表中。
@@ -22,7 +22,7 @@ POE 家族其余成员（`survtri_poe_vae_A`、`B`、`C`、`B_single`、`B_multi
 
 - **MosaicSurv 公共超参 10 键**：`LR`、`REG`、`POE_SURV_LAMBDA`、`POE_BETA_TARGET`、
   `POE_MODALITY_DROPOUT`、`POE_MMHID`、`BATCH_SIZE`、`ALPHAFIX`、`ALPHAPGC`、`BETAFIX`。
-- **与 MosaicSurv 相同**：Test1/2/3 的主模型 MosaicSurv 本身；Test4 全部 10 个消融 preset
+- **与 MosaicSurv 相同**：Test1/2/3 的主模型 MosaicSurv 本身；Test4 9 个变体及主模型参照共 10 个 preset
   （公平消融：除消融维度外超参必须一致）。
 - **独立**：Test1-3 的基线模型；10 键之外的公共参数（stage1 三键、
   架构参数、训练计划）。
@@ -209,23 +209,25 @@ mmhid 见 `model_utils.py:578,599`；`BETAFIX` 见 `utils/core_utils.py:1732`（
 | Test1（Table1 主表） | 主模型 MosaicSurv：全套 10 键 | 无 | 基线（14 个，与 POE 家族无关）用 defaults + 脚本默认，batch=1 |
 | Test2（Table2 缺失模态） | MosaicSurv：全套 10 键 | 无 | 5 个基线（modality_concat×2、mvae_poe、mopoe、hgcn）；hgcn batch=32 硬绑 |
 | Test3（Table3 缺失配比） | MosaicSurv：全套 10 键，唯一例外 `POE_MODALITY_DROPOUT=0` | unified_mask_csv 下缺失由共享 mask csv 决定，随机 drop 被强制归零（`missing_mask_protocol.py:338`），写 0 是显式化 | hgcn（batch=32 硬绑） |
-| Test4（Table4 消融） | 全部 10 个 preset：全套 10 键 | `mosaic_surv_nojeffreys` 的 `POE_BETA_TARGET=0`——改超参即消融本身（去掉 J 项） | stage1 三键（`LR_STAGE1`/`MAX_EPOCHS_STAGE1`/`BATCH_SIZE_STAGE1`）只作用于 mosaic_surv_frozen/mosaic_surv_twostage；其余独立键同 §3 |
+| Test4（Table4 消融） | 全部 10 个 preset：全套 10 键 | `mosaic_surv_nojeffreys` 的 `POE_BETA_TARGET=0`；`mosaic_surv_nodropout` 的模态 dropout=0 | stage1 三键（`LR_STAGE1`/`MAX_EPOCHS_STAGE1`/`BATCH_SIZE_STAGE1`）只作用于 mosaic_surv_frozen/mosaic_surv_twostage；其余独立键同 §3 |
 
 （各实验启用哪些模型、哪些注释，见执行版文档 `Test1-4_MosaicSurv_Hparams.md` 的模型分类总览。）
 
-## 5. Test4 消融：差异在计算图，不在超参
+## 5. Test4 消融：读出结构、训练增强与损失项
 
-超参全部一致（§4），10 个 preset 与主模型的差异只在算法维度：
+除 nojeffreys 的正则权重0和 nodropout 的模态 dropout 0外，公共超参保持一致；10个模型含主模型参照和9个变体：
 
-**A 组 — 生存读出层**（都走 C 联合训练）：
+**A 组 — A1 读出头与 A2 训练增强**（都走 C 联合训练；普通 Single 不纳入默认对照）：
 
 | preset | 读出层 | 与 MosaicSurv 的算法差异 |
 |---|---|---|
-| `mosaic_surv_single` | 单头 | 共享 fuse_fc，按当前可用 mask 一次前向，无 pattern 枚举 |
 | `mosaic_surv_single_enum` | 单头 + 枚举 | 共享单头但 7-pattern 枚举训练（pattern_id 被忽略） |
 | `mosaic_surv_noenum` | FiLM 头 | 有 FiLM 条件化，但去掉 7-pattern 枚举（只用当前 pattern 一次） |
 | `mosaic_surv`（主模型） | FiLM 头 + 枚举 | 参照 |
 | `mosaic_surv_multi` | 7 专属头 | FiLM 调制换成每个 pattern 一个独立 MLP（`MultiPatternHead`） |
+| `mosaic_surv_nodropout` | FiLM 头 + 枚举 | 仅关闭训练期模态 dropout |
+
+A1 比较主模型、single_enum、multi；A2 比较主模型、noenum、nodropout。每个变体分别与主模型比较。
 
 **B 组 — 训练范式**（读出层都是 FiLM 头）：
 

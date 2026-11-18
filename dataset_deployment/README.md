@@ -57,6 +57,10 @@ python dataset_deployment/scripts/generate_5fold_splits.py --all
   - 不生成 `splits_0~4.csv`
   - 在 `splits/5foldcv/汇总.csv` 里记录状态
 - 划分时按 `censorship` 做事件/删失分层，避免某一折验证集全删失
+- `external_test` 模式（registry 中 `split_mode: "external_test"` 的 study，如 CPTAC）：
+  - 无训练划分：5 个 `splits_0~4.csv` 内容完全相同，train 列空、val==test=全部合格患者
+  - 文件 k 的语义 = 第 k 个外部折模型的评估队列；额外落盘 `split_mode.txt` 标注模式
+  - `--validate-only` 会校验 train 列为空，且不写 `汇总.csv`
 
 5. 对齐训练特征  
 `SurvPGC_Workspace/<study>/P`  

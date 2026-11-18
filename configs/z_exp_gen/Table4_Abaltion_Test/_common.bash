@@ -92,12 +92,11 @@ generate_table4_ablation_test_configs() {
         read -r -a ablation_presets <<< "$PRESETS"
     else
         ablation_presets=(
-            mosaic_surv_single
-            mosaic_surv_single_enum
-            mosaic_surv_noenum
             mosaic_surv
-            mosaic_surv_nodropout
+            mosaic_surv_single_enum
             mosaic_surv_multi
+            mosaic_surv_noenum
+            mosaic_surv_nodropout
             mosaic_surv_twostage
             mosaic_surv_frozen
             mosaic_surv_kl

@@ -1,6 +1,6 @@
 # 对比模型实现明细
 
-这份文件只记录目前已经实际落地的内容。
+Concat/MVAE/MoPoE 部分记录已落地适配；第 4 节保留早期 HGCN 输入改装经过，不代表当前官方实验输入。当前 HGCN 使用原生 KimiaNet/GSEA/clinic 资产，对照设置见 `z_temp/baselines/对照模型设置.md`。
 每一条都按“原来是什么 / 现在改成什么 / 为什么这么改”来写。
 Flex-MoE 不在本文件范围内。
 
@@ -169,7 +169,7 @@ Flex-MoE 不在本文件范围内。
 - 原因：
   - L3 聚合机制保持原样，只替换输入特征和生存头
 
-## 4. HGCN
+## 4. HGCN（早期适配记录）
 
 ### 4.1 输入维度改造
 - 文件：`models/missing_modality_baselines/third_party/HGCN/HGCN_code/mae_model.py`
@@ -183,7 +183,7 @@ Flex-MoE 不在本文件范围内。
   - `rna_gnn_2` 输入维度是 `768`
   - `cli_gnn_2` 输入维度是 `512`
 - 原因：
-  - `z_temp/Table2/部署指南.md` 明确要求 HGCN 三路输入维度改为 `1024 / 768 / 512`
+  - `z_temp/history/baselines/部署指南.md` 明确要求 HGCN 三路输入维度改为 `1024 / 768 / 512`
   - 这里只改输入维度，不改图卷积、池化、MAE、Mixer、输出结构
 
 ### 4.2 HGCN 训练入口参数同步

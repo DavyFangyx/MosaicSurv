@@ -1,205 +1,42 @@
-# Table2 Baselines Test Commands
+# Table2：推理期模态缺失对比
 
-```bash
-cd /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init
-conda activate SurvPGC
-```
+## 实验目的与公共设置
 
-训练缺失和测试缺失是两套独立开关。Table2 只开测试 7 子集；训练配比留给 Table3。
+检验一个在完整病例上训练的模型，能否在推理期任意模态缺失时保持生存排序能力。七个队列为 BRCA、COAD、KIRC、KIRP、LIHC、LUAD、LUSC，各用相同的患者级五折划分。
 
-- 测试开关：`--eval_modalities` / `EVAL_MODALITIES`
-- 训练开关：`--missing_mode` / `MISSING_MODE`，配比是 `--missing_pattern` / `MISSING_PATTERN`
+P、G、C 分别表示病理、基因、临床模态。每个模型只训练一次，随后分别评估 P、C、G、PC、PG、CG、PCG 七种输入；前六种是缺失条件，PCG 是完整模态参照。各方法使用同一批完整病例及相同的测试子集，不为不同测试子集分别训练模型。
 
-`configs/z_exp_gen/gen_Table2_missing_modality_baselines.sh` 的结果矩阵是 7 个测试子集 x 6 个方法 x 5 个数据集。训练不是 210 次：6 个方法 x 5 个数据集只生成 30 份 config，每个模型只训一次三模态，推理期 7 个子集共用这次训练。
+常规模型使用冻结 UNI-v1 病理特征、scFoundation gene_raw 基因特征及 L0 临床特征。HGCN 保留原生 KimiaNet、GSEA 与临床图表征，不与其余方法宣称特征完全同源。
 
-## 开关语义
+## 实验组与对照组
 
-### 测试 7 子集
+| 组别 | 方法 | 融合与缺失处理 | 训练目标和关键配置 |
+|---|---|---|---|
+| 实验组 | MosaicSurv | 可用模态构成加权 PoE 后验；七个非空子集共享隐空间，FiLM 按可用模式调制生存读出 | 重建 + Jeffreys 正则 + Cox 生存损失；隐变量128、读出隐藏维128，正则目标权重0.1、生存权重1，模态 dropout 0.35 |
+| 填充对照 | Concat-zero | 各模态分别编码后拼接；缺失模态在编码前用全零特征替代 | 纯 Cox 损失；每模态表示128维，融合隐藏维256 |
+| 填充对照 | Concat-mean | 与 Concat-zero 结构相同，仅改为当前折训练集的模态均值填充；验证和测试不重估均值 | 与 Concat-zero 相同，用于隔离填充策略的作用 |
+| 生成式对照 | MVAE | 标准 PoE 聚合；缺失时只由可用模态推断联合后验 | 原生 ELBO + Cox，隐变量128、Cox 隐藏维256，KL 权重1、生存权重1；子集训练含联合、单模态及两个随机子集，KL warmup 10轮 |
+| 生成式对照 | MoPoE | 混合多个模态子集的 PoE 后验；缺失时仅使用可用子集 | 原生 MoPoE 目标 + Cox，隐变量128、Cox 隐藏维256，KL 权重1、生存权重1 |
+| 图融合对照 | HGCN | 模态图编码、模态级掩码重建及多分支风险融合；缺失槽位由原生 MAE 机制处理 | 隐藏维512、dropout 0.5；病理/基因/临床 Cox 分支权重5:1:5，MAE 重建项权重5 |
 
-`main.py`：`--eval_modalities`
-config：`EVAL_MODALITIES`
+Concat、MVAE 和 MoPoE 的 WSI 前端与主模型采用相同结构的 resampler，但参数独立训练。Concat 使用池化后拼接，MVAE/MoPoE 使用独立目标池化与生成式编码器；三者不是主模型权重的复制。
 
-- 关：`--eval_modalities off`，或不传。只评完整三模态 PCG，结果写模型目录 `test_result.csv`，不写 `eval_subsets/`。
-- 开全部：`--eval_modalities all`。这是 Table2 批量写法。PCG 写 `test_result.csv`，7 个子集写到 `eval_subsets/{P,C,G,PC,PG,CG,PCG}/test_result.csv`，共用同一次训练。
-- 也可只开部分：`--eval_modalities P,C,G` 或 `--eval_modalities wsi,clinic`。
+## 训练配置与公平性边界
 
-开/关后各模型：
+| 方法 | 优化器 | 学习率 | 权重衰减 | Batch size | 训练轮数 |
+|---|---|---|---|---|---|
+| MosaicSurv | RAdam | 0.001 | 0.0001 | 16 | 20 |
+| Concat-zero / Concat-mean / MVAE / MoPoE | RAdam | 0.0005 | 0.001 | 128 | 20 |
+| HGCN | Adam | 0.0005 | 0.0005 | 32 | 20 |
 
-- 主模型 / concat / mvae / mopoe：关则测试 `avail` 保持 dataloader 原样；开则从 splits 的完整三模态再按子集盖 mask，不和训练 csv 做 AND。
-- HGCN：关则只评原生三模态 `use_type=[img,rna,cli]`；开则按子集改 `use_type`，缺的槽位仍在图里，补 0 再交给原来的 MAE。原生评估只有 lifelines c-index，IPCW/IBS/IAUC 列保持 0。
+常规模型使用3轮学习率 warmup 和余弦调度；HGCN 保留其原生学习率调整规则。HGCN 表中配置按原生训练器实际采用值记录。
 
-### 训练 mask
+本实验不施加统一的训练缺失配比。MosaicSurv 保留内置模态 dropout，HGCN 保留原生训练掩码，其余四个对照不额外施加同一 dropout；这些属于方法配置差异。训练期缺失配比的控制实验另见 Table3。
 
-`main.py`：`--missing_mode` `--missing_pattern` `--missing_seed` `--poe_modality_dropout`
-config：`MISSING_MODE` `MISSING_PATTERN` `MISSING_SEED` `POE_MODALITY_DROPOUT`
+现有批次的 MosaicSurv 在 BRCA/LIHC 使用随机种子2，其余五队列使用1；其余对照使用1。因此现有结果不是所有方法严格同随机种子的重复实验。验证集与测试集重合的既有划分限制亦适用于本表。
 
-- 关：`--missing_mode model_gen`。这是 Table2 默认，不启用统一训练配比。
-- 开：`--missing_mode unified_mask_csv --missing_pattern 60,0,0`。同一 experiment group 的模型读同一份 fold csv；`--poe_modality_dropout` 会被强制打成 0。
+## 评估指标与比较方式
 
-关着时各模型：
+主要指标为 C-index，越高越好。各队列、各输入子集分别报告五折均值和标准差，不把多个子集作为独立患者样本合并。
 
-- 主模型：只有训练集按 `--poe_modality_dropout` 做 case 级 dropout，默认 0.2；val/test 不丢。
-- concat / mvae / mopoe：训练不额外丢模态，三模态都按完整样本走。
-- HGCN：训练仍用原生 `generate_mask()`；val/test 空 mask，不套统一配比。
-
-开着时各模型：
-
-- 所有模型，包括 HGCN，都读同一份 `results/<exp_group>/masks/<study>/pW_G_C/seed_*/fold_*.csv`。
-- 主模型不再叠加 `poe_modality_dropout`。
-- HGCN 不再自己随机丢模态，改把 csv 转成原生 `in_mask`。
-- 当前 csv 会盖到 train/val/test。`--eval_modalities` 的 7 个测试子集不再读这份 csv，而是从 splits 的完整三模态再盖评测子集。两套开关去耦合，可以同时开。
-
-配比格式是 `wsi,gene,clinic` 百分数，各模态独立采样，例如 `60,0,0` / `0,60,0` / `0,0,60` / `20,20,20` / `30,30,0`。全缺样本会随机留一个模态。
-
-## 1. HGCN
-先生成镜像图树：
-```bash
-CUDA_VISIBLE_DEVICES=0 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python SurvPGC_Workspace/generate_hgcn_graph.py
-```
-
-再训练：
-```bash
-CUDA_VISIBLE_DEVICES=2 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
-  --study tcga_kirp \
-  --modality hgcn \
-  --eval_modalities all \
-  --exp_group Table2_Baselines \
-  --run_name tcga_kirp__hgcn \
-  --split_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/splits/5foldcv/tcga_kirp \
-  --data_root_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/P/uni_v1 \
-  --gene_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/G/scFoundation_embedding_gene_raw \
-  --clinic_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/C/L4 \
-  --max_epochs 3
-```
-
-## 2. Concat - zero
-```bash
-CUDA_VISIBLE_DEVICES=3 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
-  --study tcga_kirp \
-  --modality modality_concat \
-  --concat_impute zero \
-  --bag_loss cox_surv \
-  --eval_modalities all \
-  --exp_group Table2_Baselines \
-  --run_name tcga_kirp__concat_zero \
-  --split_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/splits/5foldcv/tcga_kirp \
-  --data_root_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/P/uni_v1 \
-  --gene_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/G/scFoundation_embedding_gene_raw \
-  --clinic_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/C/L4 \
-  --k 1 --k_start 0 --k_end 1 \
-  --max_epochs 1 \
-  --batch_size 32
-```
-
-## 3. Concat - mean
-```bash
-CUDA_VISIBLE_DEVICES=4 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
-  --study tcga_kirp \
-  --modality modality_concat \
-  --concat_impute mean \
-  --bag_loss cox_surv \
-  --eval_modalities all \
-  --exp_group Table2_Baselines \
-  --run_name tcga_kirp__concat_mean \
-  --split_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/splits/5foldcv/tcga_kirp \
-  --data_root_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/P/uni_v1 \
-  --gene_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/G/scFoundation_embedding_gene_raw \
-  --clinic_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/C/L4 \
-  --k 1 --k_start 0 --k_end 1 \
-  --max_epochs 1 \
-  --batch_size 32
-```
-
-## 4. MVAE
-```bash
-CUDA_VISIBLE_DEVICES=2 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
-  --study tcga_kirp \
-  --modality mvae_poe \
-  --bag_loss cox_surv \
-  --eval_modalities all \
-  --exp_group Table2_Baselines \
-  --run_name tcga_kirp__mvae \
-  --split_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/splits/5foldcv/tcga_kirp \
-  --data_root_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/P/uni_v1 \
-  --gene_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/G/scFoundation_embedding_gene_raw \
-  --clinic_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/C/L4 \
-  --k 1 --k_start 0 --k_end 1 \
-  --max_epochs 1 \
-  --batch_size 32
-```
-
-## 5. MoPoE
-```bash
-CUDA_VISIBLE_DEVICES=7 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
-  --study tcga_kirp \
-  --modality mopoe \
-  --bag_loss cox_surv \
-  --eval_modalities all \
-  --exp_group Table2_Baselines \
-  --run_name tcga_kirp__mopoe \
-  --split_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/splits/5foldcv/tcga_kirp \
-  --data_root_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/P/uni_v1 \
-  --gene_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/G/scFoundation_embedding_gene_raw \
-  --clinic_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/C/L4 \
-  --k 1 --k_start 0 --k_end 1 \
-  --max_epochs 1 \
-  --batch_size 32
-```
-
-## 6. 主模型 B
-```bash
-CUDA_VISIBLE_DEVICES=5 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
-  --study tcga_kirp \
-  --modality survtri_poe_vae \
-  --poe_variant B \
-  --bag_loss cox_surv \
-  --eval_modalities all \
-  --exp_group Table2_Baselines \
-  --run_name tcga_kirp__survtri_poe_vae_B \
-  --split_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/splits/5foldcv/tcga_kirp \
-  --data_root_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/P/uni_v1 \
-  --gene_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/G/scFoundation_embedding_gene_raw \
-  --clinic_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/C/L4 \
-  --k 1 --k_start 0 --k_end 1 \
-  --max_epochs 1 \
-  --batch_size 32
-```
-
-上面这些命令和 Table2 批量 gen 一样：测试开 7 子集，训练 mask 关着。7 个测评共用一次训练。config 对应：
-
-```bash
-EVAL_MODALITIES=all
-MISSING_MODE=model_gen
-```
-
-Table3 训练配比示例，测试 7 子集可以同时开：
-
-```bash
-CUDA_VISIBLE_DEVICES=3 /data/fangyuxuan/miniconda3/envs/SurvPGC/bin/python main.py \
-  --study tcga_kirp \
-  --modality survtri_poe_vae \
-  --poe_variant B \
-  --bag_loss cox_surv \
-  --missing_mode unified_mask_csv \
-  --missing_pattern 20,20,20 \
-  --missing_seed 1 \
-  --eval_modalities all \
-  --exp_group Table3_MissingTrain \
-  --run_name tcga_kirp__p20_20_20 \
-  --split_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/splits/5foldcv/tcga_kirp \
-  --data_root_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/P/uni_v1 \
-  --gene_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/G/scFoundation_embedding_gene_raw \
-  --clinic_dir /data/fangyuxuan/projects/medical_dl/SurvPGC_github_init/SurvPGC_Workspace/tcga_kirp/C/L4 \
-  --k 1 --k_start 0 --k_end 1 \
-  --max_epochs 1 \
-  --batch_size 32
-```
-
-config 对应：
-
-```bash
-MISSING_MODE=unified_mask_csv
-MISSING_PATTERN=20,20,20
-MISSING_SEED=1
-EVAL_MODALITIES=all
-```
+六种缺失条件用于比较缺失鲁棒性，PCG 用于观察完整信息下的性能。缺失条件排名按同一队列、同一子集内的平均 C-index 计算；七子集平均值包含 PCG，不能与仅六个缺失条件的平均值混用。折间标准差不能代替患者抽样置信区间。

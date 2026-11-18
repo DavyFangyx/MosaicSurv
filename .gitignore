@@ -18,12 +18,16 @@ results/
 results_display/*
 !results_display/scripts/
 !results_display/scripts/**
+results_display_l1/
 splits/
 SurvPGC_Workspace/
+AnysoleWorkspace/
 configs/done/
 configs/done_backup/
 configs/failed/
 configs/queue/
+configs/queue_L1/
+configs/L1/
 configs/running/
 configs/done_single_multi23_backup
 configs/done_backup

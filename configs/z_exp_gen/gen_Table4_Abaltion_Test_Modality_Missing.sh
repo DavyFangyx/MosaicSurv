@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Table4（_Modality_Missing 子实验）MosaicSurv 消融生成：
 # Table2 式的缺失模态评测（EVAL_MODALITIES=all + MISSING_MODE=model_gen，
 # 每个模型只训一次三模态，推理期生成缺失模态并跑 7 个子集 eval）。
-# 仅 A_readout 组（读出层变体，设计动机即缺失模态推理）+ 主模型同批次参照。
+# 仅 A 组单因素对照：A1 读出头、A2 子集训练与缺失增强，共用主模型参照。
 # 协议与 Table2 对齐：CLINIC=L0 / GENE=scFoundation_embedding_gene_raw / WSI=uni_v1，
 # 公共超参统一来自 configs/z_exp_gen/mosaic_hparams.sh。
 # 结果目录：results/Table4_Abaltion_Test/_Modality_Missing/{study}__L0__gene_raw__uni_v1/。
@@ -30,14 +30,13 @@ fi
 if [ -n "${PRESETS:-}" ]; then
     read -r -a presets <<< "$PRESETS"
 else
-    # A_readout 组（读出层变体）+ 主模型同批次参照
+    # A1 读出头、A2 训练增强，共五个不同模型；不再默认生成普通 Single。
     presets=(
         mosaic_surv
-        mosaic_surv_single
         mosaic_surv_single_enum
+        mosaic_surv_multi
         mosaic_surv_noenum
         mosaic_surv_nodropout
-        mosaic_surv_multi
     )
 fi
 

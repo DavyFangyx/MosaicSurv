@@ -49,6 +49,8 @@ class SurvivalDatasetFactory:
         is_survpc_f=True,
         type_of_pathway="combine",
         clinical_file=None,
+        bins_override=None,
+        allow_missing_files=False,
         ):
         r"""
         Initialize the factory to store metadata, survival label, and slide_ids for each case id. 
@@ -77,6 +79,8 @@ class SurvivalDatasetFactory:
         self.omics_dir = omics_dir
         self.data_dir = data_dir
         self.clinical_file = clinical_file
+        self.bins_override = bins_override
+        self.allow_missing_files = allow_missing_files
         self.seed = seed
         self.print_info = print_info
         self.train_ids, self.val_ids = (None, None)
@@ -270,6 +274,10 @@ class SurvivalDatasetFactory:
         if not self.data_dir:
             return
 
+        if self.allow_missing_files:
+            # EVE3 天然缺失评估：缺 WSI 特征的患者也保留（前向时该模态零填充）
+            return
+
         if not os.path.isdir(self.data_dir):
             raise FileNotFoundError(f"WSI data_dir does not exist: {self.data_dir}")
 
@@ -281,7 +289,7 @@ class SurvivalDatasetFactory:
             missing_slides = []
             slide_ids = case_df["slide_id"].tolist()
             for slide_id in slide_ids:
-                slide_stub = slide_id[:-4] if str(slide_id).endswith(".svs") else str(slide_id)
+                slide_stub = os.path.splitext(str(slide_id))[0]
                 wsi_path = os.path.join(self.data_dir, f"{slide_stub}.pt")
                 if not os.path.exists(wsi_path):
                     missing_slides.append(str(slide_id))
@@ -325,9 +333,23 @@ class SurvivalDatasetFactory:
         
         """
         # cut the data into self.n_bins (4= quantiles)
-        disc_labels, q_bins = pd.qcut(uncensored_df[self.label_col], q=self.n_bins, retbins=True, labels=False)
-        q_bins[-1] = self.label_data[self.label_col].max() + eps
-        q_bins[0] = self.label_data[self.label_col].min() - eps
+        if self.bins_override is not None:
+            # 外部队列：冻结源数据集（如 TCGA-COAD）的内部 bin 边界，仅按本数据集
+            # 的生存时间范围放宽首尾边界（与原 qcut 路径对首尾边界的处理一致）。
+            # 外侧边界同时受相邻内部边界约束（min/max），防止源队列分位点落在
+            # 目标队列时间范围之外时产生非单调 bins（如 TCGA-BRCA 首分位 <
+            # CPTAC-BRCA 最小生存时间）；内部边界保持冻结，允许出现空箱。
+            q_bins = np.asarray(self.bins_override, dtype=np.float64).copy()
+            q_bins[-1] = max(self.label_data[self.label_col].max() + eps, q_bins[-2] + eps)
+            q_bins[0] = min(self.label_data[self.label_col].min() - eps, q_bins[1] - eps)
+            disc_labels = pd.cut(
+                uncensored_df[self.label_col], bins=q_bins, labels=False,
+                right=False, include_lowest=True,
+            )
+        else:
+            disc_labels, q_bins = pd.qcut(uncensored_df[self.label_col], q=self.n_bins, retbins=True, labels=False)
+            q_bins[-1] = self.label_data[self.label_col].max() + eps
+            q_bins[0] = self.label_data[self.label_col].min() - eps
         
         # assign patients to different bins according to their months' quantiles (on all data)
         # cut will choose bins so that the values of bins are evenly spaced. Each bin may have different frequncies
@@ -693,6 +715,7 @@ class SurvivalDatasetFactory:
             poe_modality_dropout=getattr(args, "poe_modality_dropout", 0.0),
             mask_lookup=mask_lookup,
             mask_csv_path=mask_csv_path,
+            allow_missing_files=getattr(args, "allow_missing_modality_files", False),
             )
 
         if split_key == "train":
@@ -731,6 +754,7 @@ class SurvivalDataset(Dataset):
         poe_modality_dropout=0.0,
         mask_lookup=None,
         mask_csv_path=None,
+        allow_missing_files=False,
         ): 
 
         super(SurvivalDataset, self).__init__()
@@ -761,8 +785,14 @@ class SurvivalDataset(Dataset):
         self.poe_modality_dropout = poe_modality_dropout
         self.mask_lookup = mask_lookup
         self.mask_csv_path = mask_csv_path
+        self.allow_missing_files = allow_missing_files
+        self._placeholder_shape_cache = {}
         self._feature_path_cache = {}
         self._availability_cache = {}
+        slide_to_case = {}
+        if "case_id" in metadata.columns and "slide_id" in metadata.columns:
+            slide_to_case = dict(zip(metadata["slide_id"].astype(str), metadata["case_id"].astype(str)))
+        self._slide_to_case = slide_to_case
 
         # for weighted sampling
         self.slide_cls_id_prep()
@@ -1011,9 +1041,15 @@ class SurvivalDataset(Dataset):
         patch_features = []
         # load all slide_ids corresponding for the patient
         for slide_id in slide_ids:
-            wsi_path = os.path.join(data_dir, '{}.pt'.format(slide_id.rstrip('.svs')))
+            wsi_path = os.path.join(data_dir, '{}.pt'.format(os.path.splitext(str(slide_id))[0]))
+            if not os.path.exists(wsi_path) and self.allow_missing_files:
+                continue
             wsi_bag = torch.load(wsi_path)
             patch_features.append(wsi_bag)
+        if not patch_features:
+            if not self.allow_missing_files:
+                raise FileNotFoundError(f"No WSI features under {data_dir} for slides {list(slide_ids)}")
+            patch_features = [self._zero_placeholder(data_dir, patch_mode=True)]
         patch_features = torch.cat(patch_features, dim=0)
 
         if self.sample:
@@ -1043,9 +1079,14 @@ class SurvivalDataset(Dataset):
 
 
     def _load_gene_embs_from_path(self, gene_dir, slide_ids):
-        case_id = slide_ids[0][0:12]
-        feature_path = self._resolve_case_feature_path(gene_dir, case_id)
-        gene_features = torch.load(feature_path)
+        case_id = self._slide_to_case.get(str(slide_ids[0]), str(slide_ids[0])[:12])
+        try:
+            feature_path = self._resolve_case_feature_path(gene_dir, case_id)
+            gene_features = torch.load(feature_path)
+        except FileNotFoundError:
+            if not self.allow_missing_files:
+                raise
+            gene_features = self._zero_placeholder(gene_dir)
 
         return gene_features
 
@@ -1063,9 +1104,14 @@ class SurvivalDataset(Dataset):
             - clinic_features : torch.Tensor
 
         """
-        case_id = slide_ids[0][0:12]
-        feature_path = self._resolve_case_feature_path(clinic_dir, case_id)
-        clinic_features = torch.load(feature_path)
+        case_id = self._slide_to_case.get(str(slide_ids[0]), str(slide_ids[0])[:12])
+        try:
+            feature_path = self._resolve_case_feature_path(clinic_dir, case_id)
+            clinic_features = torch.load(feature_path)
+        except FileNotFoundError:
+            if not self.allow_missing_files:
+                raise
+            clinic_features = self._zero_placeholder(clinic_dir)
 
         return clinic_features
 
@@ -1085,6 +1131,20 @@ class SurvivalDataset(Dataset):
                 "Expected either '<case_id>.pt' or a filename containing the TCGA case id."
             )
         return str(feature_path)
+
+    def _zero_placeholder(self, feature_dir, patch_mode=False):
+        key = str(feature_dir)
+        if key not in self._placeholder_shape_cache:
+            index = build_case_feature_index(feature_dir)
+            if not index:
+                self._placeholder_shape_cache[key] = (1, 1024)
+            else:
+                first_path = next(iter(index.values()))
+                self._placeholder_shape_cache[key] = tuple(torch.load(first_path, map_location="cpu").shape)
+        shape = self._placeholder_shape_cache[key]
+        if patch_mode:
+            return torch.zeros(1, shape[-1])
+        return torch.zeros(*shape)
 
     def _load_clinic_embs_onehot(self, slide_ids):
         file_path = 'D:/PycharmProjects/SurvPath-main/datasets_csv/prompt_generate/tcga-brca-clinical-one-hot.csv'

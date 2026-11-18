@@ -13,6 +13,7 @@ from torchvision import transforms
 
 from dataset_deployment.registry import get_dataset_config
 
+from .dcm_slide import open_slide
 from .edges import image_grid_edge_index
 from .paths import ensure_cut_and_pretrain_on_path, native_study_dir, resolve_study_name
 
@@ -43,9 +44,13 @@ def _svs_index(study: str) -> dict[str, Path]:
     wsi_root = Path(config.raw.wsi_root)
     index: dict[str, Path] = {}
     if wsi_root.is_dir():
-        for path in wsi_root.rglob("*.svs"):
+        for path in wsi_root.rglob(config.raw.wsi_glob):
             index[path.name] = path
             index[path.stem] = path
+            if path.suffix.lower() == ".dcm":
+                # IDC 布局：<case>/<study>/<series>/<uuid>.dcm -> <case>__<uuid>
+                case = path.parent.parent.parent.name
+                index[f"{case}__{path.stem}"] = path
     _SVS_INDEX[study] = index
     return index
 
@@ -102,7 +107,7 @@ def tiling(
 
     feature = {}
     transform = transforms.Compose([transforms.ToTensor()])
-    slide = openslide.open_slide(str(slide_filepath))
+    slide = open_slide(slide_filepath)
     if "aperio.AppMag" in slide.properties.keys():
         if slide.properties["aperio.AppMag"] == "40.000000":
             level0_magnification = int(float(slide.properties["aperio.AppMag"]))

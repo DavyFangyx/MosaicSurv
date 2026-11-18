@@ -1,57 +1,58 @@
-# Table4: MosaicSurv 消融实验清单（2026-10-07 规范化版）
+# Table4：组件消融实验
 
-主模型：`mosaic_surv`（C 联合训练 + FiLM 条件化生存头，类 `MosaicSurv`）。
-统一超参来自 `configs/z_exp_gen/mosaic_hparams.sh`（t018 十键），全部消融 preset 共享。
+## 实验目的与完整模型
 
-## A 组：读出层 × 训练方式
+通过改变读出结构、训练范式或损失项，检验 MosaicSurv 各组件对完整模态预测与缺失模态鲁棒性的贡献。
 
-| 实验 | preset / modality | 实现 | 类 |
+完整模型采用可学习加权 PoE-VAE、FiLM 条件化生存头、七个非空模态子集的生存训练及训练期模态 dropout。编码器、PoE 与读出头联合优化，目标为重建损失 + Jeffreys 正则 + Cox 生存损失。
+
+七个队列为 BRCA、COAD、KIRC、KIRP、LIHC、LUAD、LUSC，各使用相同五折划分。各组共享隐变量128、读出隐藏维128、解码器隐藏维512，学习率0.001、权重衰减0.0001、batch size 16、有监督训练20轮；除明确移除的组件外，正则目标权重0.1、生存权重1、模态 dropout 0.35保持一致，随机种子为1。
+
+## A 组：读出头与训练增强的单因素对照
+
+### A1：读出头结构
+
+三组均保留七个非空子集的生存训练和0.35模态 dropout，只改变生存读出头。
+
+| 实验组 | 生存读出 | 相对完整模型的唯一改变 | 检验问题 |
 |---|---|---|---|
-| single | `mosaic_surv_single` | C 联合训练，单一生存头 | `MosaicSurvSingle` |
-| single_enum | `mosaic_surv_single_enum` | C 联合训练，7-pattern PoE 枚举，共享单头 | `MosaicSurvSingleEnum` |
-| noenum | `mosaic_surv_noenum` | C 联合训练，按当前 `avail` 单次 PoE，不做 pattern 枚举 | `MosaicSurvNoEnum` |
-| **main** | `mosaic_surv` | C 联合训练，FiLM 条件化头，主模型 | `MosaicSurv` |
-| nodropout | `mosaic_surv_nodropout` | 主模型同构，**训练期关闭模态 dropout（`POE_MODALITY_DROPOUT=0`）** | `MosaicSurv` |
-| multi | `mosaic_surv_multi` | C 联合训练，7 个 pattern-specific fuse head | `MosaicSurvMulti` |
+| 完整模型 | FiLM 条件化共享头 | 无 | 同批次参照 |
+| Single + Enumeration | 不使用模式条件化的普通共享单头 | FiLM 条件化头替换为共享单头 | 模式条件化的作用 |
+| Multi-head | 七个子集专用头 | FiLM 共享头替换为子集专用头 | 共享条件化与独立读出的差异 |
+
+### A2：子集训练与缺失增强
+
+三组均使用相同的 FiLM 条件化共享头，分别考察七子集枚举和随机模态 dropout。
+
+| 实验组 | 子集枚举训练 | 模态 dropout | 相对完整模型的唯一改变 |
+|---|---|---|---|
+| 完整模型 | 保留 | 0.35 | 无 |
+| No Enumeration | 移除，仅训练当前可用输入 | 0.35 | 移除七子集枚举 |
+| No Dropout | 保留 | 0 | 移除随机缺失增强 |
+
+两类比较共享同一个完整模型，共五个不同模型。各变体分别与完整模型比较；No Enumeration 与 No Dropout 不作为彼此的单因素对照。普通 Single 同时移除 FiLM 与子集枚举，不纳入本次单因素消融。
 
 ## B 组：训练范式
 
-| 实验 | preset / modality | 实现 | 类 |
+| 实验组 | 训练设置 | 与完整模型的区别 |
+|---|---|---|
+| Two-stage | 先进行 VAE 预训练，再冻结编码、PoE 与解码部分，仅训练 FiLM 生存头；采用两阶段范式 | 生存监督不能端到端更新表征 |
+| Frozen | 预训练 VAE 后冻结主干，进行 FiLM 读出的冻结表征探针训练 | 检验固定无监督表征的生存预测能力；保留原冻结探针范式 |
+
+两组均保留 FiLM 与子集读出；VAE 预训练预算为10轮，batch size 128。Two-stage 与 Frozen 是原两阶段训练和冻结探针范式的两个变体，不能概括为仅改变“是否预训练”的单变量对照。
+
+## C 组：正则与生存监督
+
+| 实验组 | 改变的组件 | 保留的组件 | 检验问题 |
 |---|---|---|---|
-| twostage | `mosaic_surv_twostage` | B 两阶段训练，冻结 Enc/PoE/Dec，仅训练 FiLM 头 | `MosaicSurvTwostage` |
-| frozen | `mosaic_surv_frozen` | A 训练范式，冻结 backbone，仅训练 FiLM 读出头 | `MosaicSurvFrozen` |
+| KL | 将 Jeffreys 正则替换为标准 KL，目标权重仍为0.1 | 重建与生存目标、FiLM、子集训练 | 正则形式的作用 |
+| No Jeffreys | 将正则权重置0 | 重建与生存目标、FiLM、子集训练 | 分布正则项的作用 |
+| Detached | 阻断生存损失对编码器和 PoE 模态权重的梯度 | 生存损失仍训练 FiLM 头；重建与正则仍训练表征 | 生存监督塑造共享表征的作用 |
 
-## C 组：损失项
+## 测试条件与指标
 
-| 实验 | preset / modality | 实现 | 类 |
-|---|---|---|---|
-| kl | `mosaic_surv_kl` | Jeffreys 替换为标准 KL | `MosaicSurvKL` |
-| nojeffreys | `mosaic_surv_nojeffreys` | 去除联合损失中的 J 项（`POE_BETA_TARGET=0`） | `MosaicSurv` |
-| detached | `mosaic_surv_detached` | 去除联合损失中的 L_surv 回传（FiLM 头保留 λL_surv；L_surv 不回传 Encoder/PoE alpha） | `MosaicSurvDetached` |
+完整模态评估包含全部10个模型，在 P+C+G 输入下比较五折 C-index 均值与标准差。输入为冻结 UNI-v1、scFoundation cell_norm 和 L0 临床特征。
 
-detached（原 surv0）实现语义：`surv_detach_poe=True` → multi_pattern_surv_step 里 PoE
-计算包在 `torch.no_grad()` 中。实测梯度：encoder_grad=None，head_grad=有。
-即 L_surv 仍保留在损失里、仍训练 FiLM 头，只是不回传 encoder/PoE alpha。
+缺失模态评估仅包含 A 组五个模型，分别测试 P、C、G、PC、PG、CG、PCG；输入的基因特征为 gene_raw，其他特征不变。各模型只训练一次，所有测试子集使用同一折模型。
 
-## 生成与汇总
-
-默认生成 BRCA、COAD、KIRC、KIRP、LIHC 五个数据集：
-
-```bash
-# _Cindex_Main（A/B/C 三组完整模态 C-index）
-bash configs/z_exp_gen/gen_Table4_Abaltion_Test_Cindex_Main.sh
-# _Modality_Missing（仅 A 组，Table2 式缺失模态评测）
-bash configs/z_exp_gen/gen_Table4_Abaltion_Test_Modality_Missing.sh
-```
-
-结果目录：
-
-- `results/Table4_Abaltion_Test/_Cindex_Main/{study}__cell_norm__uni_v1/{modality}/`
-- `results/Table4_Abaltion_Test/_Modality_Missing/{study}__L0__gene_raw__uni_v1/{modality}/`
-
-汇总脚本：
-
-```bash
-python3 results_display/scripts/Table4_Abaltion_Test_Cindex_Main.py
-python3 results_display/scripts/Table4_Abaltion_Test_Modality_Missing.py
-```
+两类评估各使用本批次完整模型作为对照，不能与 Table1 或另一子实验的完整模型结果互换。单个变体平均分较高或较低只说明观测差异，不能仅据五折均值或标准差宣称统计显著。

@@ -51,6 +51,9 @@ class DatasetConfig:
     workspace_root: str
     enabled: bool
     raw: RawDatasetConfig
+    # 划分模式：5foldcv = 标准五折 CV；external_test = 外部队列（无训练划分，
+    # n_splits 个 splits 文件内容相同：train 空、val==test=全部合格患者）。
+    split_mode: str = "5foldcv"
 
     @property
     def study_subtype(self) -> str:
@@ -312,6 +315,7 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
         split_dir="splits/5foldcv/cptac_coad",
         workspace_root="SurvPGC_Workspace/cptac_coad",
         enabled=True,
+        split_mode="external_test",
         raw=RawDatasetConfig(
             raw_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad",
             gene_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_coad/Bulk_RNA",
@@ -343,6 +347,7 @@ DATASET_CONFIGS: dict[str, DatasetConfig] = {
         split_dir="splits/5foldcv/cptac_brca",
         workspace_root="SurvPGC_Workspace/cptac_brca",
         enabled=True,
+        split_mode="external_test",
         raw=RawDatasetConfig(
             raw_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca",
             gene_root="/data/lizhe/Medteam_projects/CPTAC_data/cptac_brca/Bulk_RNA",

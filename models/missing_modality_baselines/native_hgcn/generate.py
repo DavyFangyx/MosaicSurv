@@ -93,6 +93,7 @@ def generate_study(
     tissue_thresh: float = DEFAULT_TISSUE_THRESH,
     filter_method: str = DEFAULT_FILTER_METHOD,
     experiment: str = HGCN_WSI_EXPERIMENT,
+    shard: tuple[int, int] | None = None,
 ) -> dict[str, int]:
     study = resolve_study_name(study)
     root = Path(repo_root) if repo_root is not None else REPO_ROOT
@@ -117,8 +118,17 @@ def generate_study(
         if slide_id not in case_slides[case_id]:
             case_slides[case_id].append(slide_id)
 
+    if shard is not None:
+        shard_index, shard_count = shard
+        ordered = sorted(case_slides)
+        case_slides = {
+            case_id: case_slides[case_id]
+            for position, case_id in enumerate(ordered)
+            if position % shard_count == shard_index
+        }
+
     print(
-        f"[native-hgcn] study={study} patients={len(case_slides)} dest={dest}",
+        f"[native-hgcn] study={study} patients={len(case_slides)} dest={dest} shard={shard}",
         flush=True,
     )
 
@@ -195,6 +205,11 @@ def generate_study(
         if max_cases is None:
             keep = set(case_slides)
             t_img_fea = {case_id: patches for case_id, patches in t_img_fea.items() if case_id in keep}
+        if shard is not None and dest.is_file():
+            merged = joblib.load(dest)
+            if isinstance(merged, dict):
+                merged.update(t_img_fea)
+                t_img_fea = merged
         joblib.dump(t_img_fea, dest)
     elif not dry_run and dest.is_file() and not t_img_fea:
         dest.unlink()
@@ -231,12 +246,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["rgb", "otsu", "adaptive"],
     )
     parser.add_argument("--experiment", type=str, default=HGCN_WSI_EXPERIMENT)
+    parser.add_argument(
+        "--shard",
+        type=str,
+        default=None,
+        help="Shard the case list as 'K/N' (0-based), e.g. 1/5; results merged on disk.",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(argv)
     studies = _select_studies(args.study)
+    shard = None
+    if args.shard:
+        shard_index, shard_count = (int(part) for part in args.shard.split("/", 1))
+        shard = (shard_index, shard_count)
     for study in studies:
         generate_study(
             study,
@@ -252,6 +277,7 @@ def main(argv: list[str] | None = None) -> None:
             tissue_thresh=args.tissue_thresh,
             filter_method=args.filter_method,
             experiment=args.experiment,
+            shard=shard,
         )
 
 

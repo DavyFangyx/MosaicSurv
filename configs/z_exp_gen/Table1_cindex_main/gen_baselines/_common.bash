@@ -21,6 +21,16 @@ EOF
     exit 2
 fi
 
+should_skip_tag() {
+    local tag="$1"
+    local candidate
+    [ -n "${SKIP_MODALITY_TAGS:-}" ] || return 1
+    for candidate in ${SKIP_MODALITY_TAGS//,/ }; do
+        [ "$candidate" = "$tag" ] && return 0
+    done
+    return 1
+}
+
 generate_full_model_val_configs() {
     : "${STUDY:?STUDY is required}"
     : "${EXP_GROUP:?EXP_GROUP is required}"
@@ -116,6 +126,9 @@ generate_full_model_val_configs() {
     skipped=0
 
     for preset in "${wsi_models[@]}"; do
+        if should_skip_tag P; then
+            continue
+        fi
         seq=$((seq + 1))
         fname=$(printf "%s__%03d__P__%s.conf" "$file_prefix" "$seq" "$preset")
         target="$out_dir/$fname"
@@ -133,6 +146,9 @@ EOF
     done
 
     for preset in "${clinic_models[@]}"; do
+        if should_skip_tag C; then
+            continue
+        fi
         seq=$((seq + 1))
         fname=$(printf "%s__%03d__C__%s.conf" "$file_prefix" "$seq" "$preset")
         target="$out_dir/$fname"
@@ -150,6 +166,9 @@ EOF
     done
 
     for preset in "${gene_models[@]}"; do
+        if should_skip_tag G; then
+            continue
+        fi
         seq=$((seq + 1))
         fname=$(printf "%s__%03d__G__%s.conf" "$file_prefix" "$seq" "$preset")
         target="$out_dir/$fname"
@@ -173,7 +192,6 @@ EOF
     done
 
     for preset in "${multi_models[@]}"; do
-        seq=$((seq + 1))
         modality_tag="PCG"
         case "$preset" in
             survpc_f)
@@ -190,6 +208,10 @@ EOF
                 modality_tag="PCG"
                 ;;
         esac
+        if should_skip_tag "$modality_tag"; then
+            continue
+        fi
+        seq=$((seq + 1))
 
         fname=$(printf "%s__%03d__%s__%s.conf" "$file_prefix" "$seq" "$modality_tag" "$preset")
         target="$out_dir/$fname"

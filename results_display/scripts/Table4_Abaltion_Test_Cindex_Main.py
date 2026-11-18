@@ -1,11 +1,12 @@
 """
 Collect Table 4（_Cindex_Main 子实验）ablation c-index comparison tables.
 
-The three ablation tests are defined in z_temp/Table4/ablation_checklist.md:
+The ablation tables are defined in z_temp/Table4/ablation_checklist.md:
 
-    A_readout   readout layer x training scheme (mosaic_surv_single,
-                mosaic_surv_single_enum, mosaic_surv_noenum, mosaic_surv,
-                mosaic_surv_multi)
+    A1_head          head structure (mosaic_surv_single_enum,
+                     mosaic_surv_multi), sharing mosaic_surv as reference.
+    A2_augmentation  training augmentation (mosaic_surv_noenum,
+                     mosaic_surv_nodropout), sharing mosaic_surv as reference.
     B_training  training paradigm (mosaic_surv_twostage, mosaic_surv_frozen)
     C_loss      joint-loss terms (mosaic_surv_kl, mosaic_surv_nojeffreys,
                 mosaic_surv_detached)
@@ -14,14 +15,15 @@ Every test is compared against the main model `mosaic_surv` (first row of
 each table). The whole batch uses the single unified MosaicSurv
 hyperparameters from configs/z_exp_gen/mosaic_hparams.sh（由
 configs/z_exp_gen/gen_Table4_Abaltion_Test_Cindex_Main.sh 生成，结果目录
-不带 run_id 后缀）。A/B/C 三组消融都进行。
+不带 run_id 后缀）。A1/A2/B/C 四张单因素对照表都进行。
 
 Default input:
     results/Table4_Abaltion_Test/_Cindex_Main/{study}__* /{model}/test_result.csv
     （每个 study 一个运行目录，如 tcga_brca__cell_norm__uni_v1）
 
 Default outputs:
-    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_A_readout_7datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_A1_head_7datasets.csv
+    results_display/Table4_Abaltion_Test/_Cindex_Main/summary_A2_augmentation_7datasets.csv
     results_display/Table4_Abaltion_Test/_Cindex_Main/summary_B_training_7datasets.csv
     results_display/Table4_Abaltion_Test/_Cindex_Main/summary_C_loss_7datasets.csv
 
@@ -39,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import math
 import shutil
 from pathlib import Path
@@ -53,12 +56,13 @@ GROUP_DIR = "Table4_Abaltion_Test/_Cindex_Main"
 MAIN_MODEL = "mosaic_surv"
 
 GROUP_SPECS = {
-    "A_readout": [
-        "mosaic_surv_single",
+    "A1_head": [
         "mosaic_surv_single_enum",
+        "mosaic_surv_multi",
+    ],
+    "A2_augmentation": [
         "mosaic_surv_noenum",
         "mosaic_surv_nodropout",
-        "mosaic_surv_multi",
     ],
     "B_training": [
         "mosaic_surv_twostage",
@@ -224,8 +228,25 @@ def write_table(frame: pd.DataFrame, out_dir: Path, group_key: str) -> None:
     print(f"[WRITE] {out_path.relative_to(project_root_from_script())}")
 
 
+def archive_path(path: Path) -> None:
+    """Move a legacy display output to AnysoleWorkspace/_trash/<date>/.
+    Project rule: never delete; archive and list for confirmation."""
+    project_root = project_root_from_script()
+    trash_root = (
+        project_root / "AnysoleWorkspace" / "_trash" / datetime.date.today().isoformat()
+    )
+    try:
+        relative = path.relative_to(project_root)
+    except ValueError:
+        relative = Path(path.name)
+    target = trash_root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(path), str(target))
+    print(f"[ARCHIVE] {path} -> {target}")
+
+
 def clean_legacy_outputs(out_root: Path) -> None:
-    """Remove legacy display outputs at the pre-reorganization locations:
+    """Archive legacy display outputs at the pre-reorganization locations:
     the flat files and per-run_id folders under the old
     results_display/Table4_Abaltion_Test/ root (superseded by the
     _Cindex_Main / _Modality_Missing sub-experiment layout).
@@ -236,13 +257,15 @@ def clean_legacy_outputs(out_root: Path) -> None:
     for name in ("summary.csv", "summary_5datasets.csv"):
         path = old_root / name
         if path.exists():
-            path.unlink()
-            print(f"[CLEAN] {path.relative_to(project_root_from_script())}")
+            archive_path(path)
     for name in ("summary", "t025_alpha_learn", "t028_orig", "t028_alpha_learn"):
         legacy_dir = old_root / name
         if legacy_dir.is_dir():
-            shutil.rmtree(legacy_dir)
-            print(f"[CLEAN] {legacy_dir.relative_to(project_root_from_script())}")
+            archive_path(legacy_dir)
+    # 旧版把 A1/A2 合并成一张 A_readout 表；已拆成两张单因素表后归档该派生文件。
+    legacy_a = out_root / "summary_A_readout_7datasets.csv"
+    if legacy_a.exists():
+        archive_path(legacy_a)
 
 
 def main() -> None:

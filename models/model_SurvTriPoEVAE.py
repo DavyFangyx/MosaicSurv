@@ -292,7 +292,12 @@ class SurvTriPoEVAE(nn.Module):
     def survival_loss_from_cached(self, event_time, censor, loss_fn, avail_real=None, min_batch_for_cox=8):
         cached = self.get_cached_outputs()
         if not self.uses_multi_pattern_surv:
-            return loss_fn(h=cached["risk"], t=event_time, c=censor)
+            # 单因素对照：生存头统一用后验均值 mu（与枚举路径一致），
+            # 采样 z 只用于 VAE 重建，避免关闭枚举时同时改变生存头的输入。
+            risk, fused = self._survival_head(cached["mu_joint"], cached["available_mask"])
+            cached["risk"] = risk
+            cached["fused"] = fused
+            return loss_fn(h=risk, t=event_time, c=censor)
         if avail_real is None:
             avail_real = torch.ones_like(cached["available_mask"])
         result = multi_pattern_surv_step(

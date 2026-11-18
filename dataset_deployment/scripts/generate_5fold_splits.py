@@ -209,6 +209,7 @@ def generate_splits_for_study(
     seed: int = 1,
 ) -> dict[str, object]:
     config = get_dataset_config(study)
+    split_mode = getattr(config, "split_mode", "5foldcv")
     metadata_csv = Path(config.metadata_csv)
     output_dir = Path(config.split_dir)
     eligibility_df, summary = build_split_eligibility(study)
@@ -238,6 +239,8 @@ def generate_splits_for_study(
             for column in ("train", "val", "test"):
                 if column not in df.columns:
                     raise ValueError(f"{split_path} missing column {column}")
+            if split_mode == "external_test" and len(df["train"].dropna()):
+                raise ValueError(f"{split_path} expected empty train column (study {study} is external_test)")
         return {"study": study, "folds": n_splits, "output": str(output_dir), "mode": "validate", "eligibility_csv": str(eligibility_path), "status": status, **summary}
 
     case_ids = sorted(eligibility_df.loc[eligibility_df["eligible_for_split"], "case_id"].astype(str).tolist())
@@ -268,7 +271,13 @@ def generate_splits_for_study(
     filtered_metadata_df.to_csv(cohort_metadata_path, index=False)
     tmp_metadata_csv = output_dir / "_tmp_split_metadata.csv"
     filtered_metadata_df.to_csv(tmp_metadata_csv, index=False)
-    folds = build_stratified_folds(tmp_metadata_csv, n_splits=n_splits, seed=seed)
+    if split_mode == "external_test":
+        # 外部队列：无训练划分。n_splits 个 splits 文件内容完全相同
+        # （train 列空、val==test=全部合格患者）；文件 k 的语义 = 第 k 个外部折模型的评估队列。
+        folds = [case_ids for _ in range(n_splits)]
+        (output_dir / "split_mode.txt").write_text("external_test", encoding="utf-8")
+    else:
+        folds = build_stratified_folds(tmp_metadata_csv, n_splits=n_splits, seed=seed)
     if dry_run:
         tmp_metadata_csv.unlink(missing_ok=True)
         return {
@@ -283,7 +292,10 @@ def generate_splits_for_study(
         }
 
     for fold, val_ids in enumerate(folds):
-        train_ids = [case_id for idx, fold_cases in enumerate(folds) if idx != fold for case_id in fold_cases]
+        if split_mode == "external_test":
+            train_ids: list[str] = []
+        else:
+            train_ids = [case_id for idx, fold_cases in enumerate(folds) if idx != fold for case_id in fold_cases]
         save_split_csv(train_ids, val_ids, output_dir / f"splits_{fold}.csv")
     cleanup_existing_split_files(output_dir, 0)
 
@@ -295,6 +307,7 @@ def generate_splits_for_study(
         "eligibility_csv": str(eligibility_path),
         "cohort_metadata_csv": str(cohort_metadata_path),
         "status": status,
+        "split_mode": split_mode,
         **summary,
     }
 
@@ -330,9 +343,9 @@ def main() -> None:
                 "output": str(Path(get_dataset_config(study).split_dir)),
                 "status": f"failed: {exc}",
             }
-        summaries.append({key: value for key, value in result.items() if key not in {"eligibility_csv", "cohort_metadata_csv", "output"}})
+        summaries.append({key: value for key, value in result.items() if key not in {"eligibility_csv", "cohort_metadata_csv", "output", "split_mode"}})
         print(result)
-    if summaries:
+    if summaries and not args.validate_only:
         write_split_summary(summaries, merge_existing=bool(args.study))
 
 
