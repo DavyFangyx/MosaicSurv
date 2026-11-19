@@ -27,6 +27,13 @@ Default outputs:
     results_display/Table4_Abaltion_Test/_Cindex_Main/summary_B_training_7datasets.csv
     results_display/Table4_Abaltion_Test/_Cindex_Main/summary_C_loss_7datasets.csv
 
+L1 并行批次：训练结果在 Table4_Abaltion_Test_L1/_Cindex_Main，展示仍镜像
+L0 目录结构，写入 results_display_l1/Table4_Abaltion_Test/_Cindex_Main：
+    python results_display/scripts/Table4_Abaltion_Test_Cindex_Main.py \
+      --group-dir Table4_Abaltion_Test_L1/_Cindex_Main \
+      --display-dir Table4_Abaltion_Test/_Cindex_Main \
+      --output-root results_display_l1
+
 Every table keeps the classic summary_7datasets.csv row/column layout:
 rows are models, columns are the seven mainline datasets
 (BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC) plus a mean column. Missing
@@ -44,6 +51,7 @@ import csv
 import datetime
 import math
 import shutil
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -52,6 +60,9 @@ from model_names import display_name
 
 
 GROUP_DIR = "Table4_Abaltion_Test/_Cindex_Main"
+# 展示目录固定镜像 L0 的 results_display/Table4_Abaltion_Test/_Cindex_Main，
+# 与训练结果目录（L1 批次可不同）解耦。
+DISPLAY_DIR = "Table4_Abaltion_Test/_Cindex_Main"
 
 MAIN_MODEL = "mosaic_surv"
 
@@ -228,24 +239,58 @@ def write_table(frame: pd.DataFrame, out_dir: Path, group_key: str) -> None:
     print(f"[WRITE] {out_path.relative_to(project_root_from_script())}")
 
 
-def archive_path(path: Path) -> None:
-    """Move a legacy display output to AnysoleWorkspace/_trash/<date>/.
-    Project rule: never delete; archive and list for confirmation."""
+def _unique_target(target: Path, occupied: set[Path]) -> Path:
+    """Return a non-conflicting archive target, suffixes .1/.2/... on collision."""
+    candidate = target
+    index = 0
+    while candidate.exists() or candidate in occupied:
+        index += 1
+        candidate = target.with_name(f"{target.name}.{index}")
+    occupied.add(candidate)
+    return candidate
+
+
+def archive_paths(paths: list[Path], assume_yes: bool = False) -> list[Path]:
+    """Archive display outputs to AnysoleWorkspace/_trash/<date>/.
+    Print the full plan first; move only after --yes or an interactive y/N."""
+    if not paths:
+        return []
     project_root = project_root_from_script()
     trash_root = (
         project_root / "AnysoleWorkspace" / "_trash" / datetime.date.today().isoformat()
     )
-    try:
-        relative = path.relative_to(project_root)
-    except ValueError:
-        relative = Path(path.name)
-    target = trash_root / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(path), str(target))
-    print(f"[ARCHIVE] {path} -> {target}")
+    occupied: set[Path] = set()
+    plan: list[tuple[Path, Path]] = []
+    for path in paths:
+        try:
+            relative = path.relative_to(project_root)
+        except ValueError:
+            relative = Path(path.name)
+        target = _unique_target(trash_root / relative, occupied)
+        plan.append((path, target))
+
+    print("[ARCHIVE-PLAN]")
+    for source, target in plan:
+        print(f"  {source} -> {target}")
+    if not assume_yes:
+        if not sys.stdin.isatty():
+            print("[ARCHIVE-SKIP] non-interactive; pass --yes to archive")
+            return []
+        answer = input("Archive the paths above? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print("[ARCHIVE-SKIP] cancelled")
+            return []
+
+    moved: list[Path] = []
+    for source, target in plan:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+        print(f"[ARCHIVE] {source} -> {target}")
+        moved.append(target)
+    return moved
 
 
-def clean_legacy_outputs(out_root: Path) -> None:
+def clean_legacy_outputs(out_root: Path, assume_yes: bool = False) -> None:
     """Archive legacy display outputs at the pre-reorganization locations:
     the flat files and per-run_id folders under the old
     results_display/Table4_Abaltion_Test/ root (superseded by the
@@ -254,18 +299,20 @@ def clean_legacy_outputs(out_root: Path) -> None:
     不随主线数据集范围扩大而改名。
     Only called when --clean-legacy is passed explicitly."""
     old_root = out_root.parent
+    paths: list[Path] = []
     for name in ("summary.csv", "summary_5datasets.csv"):
         path = old_root / name
         if path.exists():
-            archive_path(path)
+            paths.append(path)
     for name in ("summary", "t025_alpha_learn", "t028_orig", "t028_alpha_learn"):
         legacy_dir = old_root / name
         if legacy_dir.is_dir():
-            archive_path(legacy_dir)
+            paths.append(legacy_dir)
     # 旧版把 A1/A2 合并成一张 A_readout 表；已拆成两张单因素表后归档该派生文件。
     legacy_a = out_root / "summary_A_readout_7datasets.csv"
     if legacy_a.exists():
-        archive_path(legacy_a)
+        paths.append(legacy_a)
+    archive_paths(paths, assume_yes=assume_yes)
 
 
 def main() -> None:
@@ -288,21 +335,35 @@ def main() -> None:
     parser.add_argument(
         "--group-dir",
         default=GROUP_DIR,
-        help="Grouped results/output directory name",
+        help="Grouped results directory name (training tree)",
+    )
+    parser.add_argument(
+        "--display-dir",
+        default=DISPLAY_DIR,
+        help=(
+            "Display subdirectory under --output-root; default mirrors the L0 "
+            "layout Table4_Abaltion_Test/_Cindex_Main"
+        ),
     )
     parser.add_argument(
         "--clean-legacy",
         action="store_true",
         help=(
-            "Delete the legacy display outputs (flat summary files and the "
-            "per-run_id folders of the superseded three-batch layout) before writing"
+            "Archive the legacy display outputs (flat summary files and the "
+            "per-run_id folders of the superseded three-batch layout) to "
+            "AnysoleWorkspace/_trash/<date>/ before writing"
         ),
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm the --clean-legacy archive plan without an interactive prompt",
     )
     args = parser.parse_args()
 
-    out_root = args.output_root / args.group_dir
+    out_root = args.output_root / args.display_dir
     if args.clean_legacy:
-        clean_legacy_outputs(out_root)
+        clean_legacy_outputs(out_root, assume_yes=args.yes)
 
     all_models = {MAIN_MODEL} | {
         model for models in GROUP_SPECS.values() for model in models

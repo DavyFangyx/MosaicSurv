@@ -222,12 +222,14 @@ mmhid 见 `model_utils.py:578,599`；`BETAFIX` 见 `utils/core_utils.py:1732`（
 | preset | 读出层 | 与 MosaicSurv 的算法差异 |
 |---|---|---|
 | `mosaic_surv_single_enum` | 单头 + 枚举 | 共享单头但 7-pattern 枚举训练（pattern_id 被忽略） |
-| `mosaic_surv_noenum` | FiLM 头 | 有 FiLM 条件化，但去掉 7-pattern 枚举（只用当前 pattern 一次） |
+| `mosaic_surv_noenum` | FiLM 头 | 有 FiLM 条件化，但去掉 7-pattern 枚举（只用当前 pattern 一次）；原实现还伴随生存头输入 μ→z 差异，当前实现统一为 μ |
 | `mosaic_surv`（主模型） | FiLM 头 + 枚举 | 参照 |
 | `mosaic_surv_multi` | 7 专属头 | FiLM 调制换成每个 pattern 一个独立 MLP（`MultiPatternHead`） |
 | `mosaic_surv_nodropout` | FiLM 头 + 枚举 | 仅关闭训练期模态 dropout |
 
 A1 比较主模型、single_enum、multi；A2 比较主模型、noenum、nodropout。每个变体分别与主模型比较。
+
+注意：No Enumeration 关闭枚举时，原实现把生存头输入由后验均值 μ 换成采样潜变量 z，因此原始结果不是严格单因素对照；当前实现已统一为 μ。
 
 **B 组 — 训练范式**（读出层都是 FiLM 头）：
 

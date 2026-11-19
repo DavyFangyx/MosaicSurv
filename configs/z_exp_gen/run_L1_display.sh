@@ -17,6 +17,10 @@
 #   OUT_ROOT=results_display_l1  输出根目录
 #   GPU=4                        Table1 cox 前向使用的 GPU
 #   SKIP_COX=1                   Table1 跳过 cox Breslow 前向（IBS/AUC 显示为 -）
+#   CONFIRM_ARCHIVE=1            显式确认：先列旧产物清单，再归档到
+#                                AnysoleWorkspace/_trash/<date>/ 后重新生成。
+#                                默认 0，不替用户确认；存在旧产物时展示脚本会
+#                                打印完整清单并退出。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -26,6 +30,19 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 OUT_ROOT="${OUT_ROOT:-$SCRIPT_DIR/results_display_l1}"
 GPU="${GPU:-4}"
 STAGE="${1:-all}"
+case "$GPU" in
+    1|2|3|4) ;;
+    *)
+        echo "[L1-DISPLAY] GPU 限定为 1/2/3/4，当前 GPU=$GPU" >&2
+        exit 2
+        ;;
+esac
+
+CONFIRM_ARCHIVE="${CONFIRM_ARCHIVE:-0}"
+archive_flag=()
+if [ "$CONFIRM_ARCHIVE" = "1" ]; then
+    archive_flag=(--confirm-archive)
+fi
 
 mkdir -p "$OUT_ROOT"
 
@@ -36,27 +53,30 @@ run_table1() {
     fi
     "$PYTHON_BIN" results_display/scripts/Table1_Generate_All.py \
         --test-dir L1Test \
-        --output-root "$OUT_ROOT" \
+        --output_root "$OUT_ROOT" \
         --gpu "$GPU" \
-        "${cox_flag[@]}"
+        "${cox_flag[@]}" \
+        "${archive_flag[@]}"
 }
 
 run_table2() {
     "$PYTHON_BIN" results_display/scripts/Table2_Modality_Missing_Tset.py \
         --group-dir Table2_Baselines_L1 \
         --run-suffix L1__gene_raw__uni_v1 \
-        --output-root "$OUT_ROOT"
+        --output_root "$OUT_ROOT"
 }
 
 run_table3() {
     "$PYTHON_BIN" results_display/scripts/Table3_Train_MissingRate.py \
         --group-dir Table3_MissingRate_L1 \
-        --output_root "$OUT_ROOT"
+        --output_root "$OUT_ROOT" \
+        "${archive_flag[@]}"
 }
 
 run_table4() {
     "$PYTHON_BIN" results_display/scripts/Table4_Abaltion_Test_Cindex_Main.py \
         --group-dir Table4_Abaltion_Test_L1/_Cindex_Main \
+        --display-dir Table4_Abaltion_Test/_Cindex_Main \
         --output-root "$OUT_ROOT"
     "$PYTHON_BIN" results_display/scripts/Table4_Abaltion_Test_Modality_Missing.py \
         --group-dir Table4_Abaltion_Test_L1/_Modality_Missing \
@@ -67,7 +87,8 @@ run_figc() {
     "$PYTHON_BIN" results_display/scripts/FigC_KM_curves.py \
         --test-dir L1Test \
         --dataset all \
-        --output-root "$OUT_ROOT/FigC_KM_curves"
+        --output-root "$OUT_ROOT/FigC_KM_curves" \
+        "${archive_flag[@]}"
 }
 
 case "$STAGE" in

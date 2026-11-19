@@ -19,6 +19,12 @@ Default outputs:
         （Table2 summary 式双层行：(subset, model) x 7 数据集 + mean）
     results_display/Table4_Abaltion_Test/_Modality_Missing/baseline_ranking_A1_head.png
     results_display/Table4_Abaltion_Test/_Modality_Missing/baseline_ranking_A2_augmentation.png
+
+L1 并行批次：训练结果在 Table4_Abaltion_Test_L1/_Modality_Missing，展示仍镜像
+L0 目录结构，写入 results_display_l1/Table4_Abaltion_Test/_Modality_Missing：
+    python results_display/scripts/Table4_Abaltion_Test_Modality_Missing.py \
+      --group-dir Table4_Abaltion_Test_L1/_Modality_Missing \
+      --output-root results_display_l1
         （数据集行数 = len(STUDY_SPECS)（当前 7：BRCA/COAD/KIRC/KIRP/LIHC/LUAD/LUSC）
         x 8 列（7 子集 + MEAN）的排名图，与 Table2 构图一致）
 
@@ -34,6 +40,7 @@ import datetime
 import math
 import re
 import shutil
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -359,31 +366,67 @@ def _write_group_ranking_figure(
     return out_path
 
 
-def archive_path(path: Path) -> None:
-    """Move a legacy display output to AnysoleWorkspace/_trash/<date>/.
-    Project rule: never delete; archive and list for confirmation."""
+def _unique_target(target: Path, occupied: set[Path]) -> Path:
+    """Return a non-conflicting archive target, suffixes .1/.2/... on collision."""
+    candidate = target
+    index = 0
+    while candidate.exists() or candidate in occupied:
+        index += 1
+        candidate = target.with_name(f"{target.name}.{index}")
+    occupied.add(candidate)
+    return candidate
+
+
+def archive_paths(paths: list[Path], assume_yes: bool = False) -> list[Path]:
+    """Archive display outputs to AnysoleWorkspace/_trash/<date>/.
+    Print the full plan first; move only after --yes or an interactive y/N."""
+    if not paths:
+        return []
     project_root = project_root_from_script()
     trash_root = (
         project_root / "AnysoleWorkspace" / "_trash" / datetime.date.today().isoformat()
     )
-    try:
-        relative = path.relative_to(project_root)
-    except ValueError:
-        relative = Path(path.name)
-    target = trash_root / relative
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.move(str(path), str(target))
-    print(f"[ARCHIVE] {path} -> {target}")
+    occupied: set[Path] = set()
+    plan: list[tuple[Path, Path]] = []
+    for path in paths:
+        try:
+            relative = path.relative_to(project_root)
+        except ValueError:
+            relative = Path(path.name)
+        target = _unique_target(trash_root / relative, occupied)
+        plan.append((path, target))
+
+    print("[ARCHIVE-PLAN]")
+    for source, target in plan:
+        print(f"  {source} -> {target}")
+    if not assume_yes:
+        if not sys.stdin.isatty():
+            print("[ARCHIVE-SKIP] non-interactive; pass --yes to archive")
+            return []
+        answer = input("Archive the paths above? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print("[ARCHIVE-SKIP] cancelled")
+            return []
+
+    moved: list[Path] = []
+    for source, target in plan:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(target))
+        print(f"[ARCHIVE] {source} -> {target}")
+        moved.append(target)
+    return moved
 
 
-def clean_legacy_outputs(output_root: Path) -> None:
+def clean_legacy_outputs(output_root: Path, assume_yes: bool = False) -> None:
     """Archive the superseded combined A_readout summary/ranking outputs.
     Only called when --clean-legacy is passed explicitly."""
     out_dir = output_root / DISPLAY_DIR
-    for name in ("summary_A_readout_missing.csv", "baseline_ranking.png"):
-        path = out_dir / name
-        if path.exists():
-            archive_path(path)
+    paths = [
+        out_dir / name
+        for name in ("summary_A_readout_missing.csv", "baseline_ranking.png")
+        if (out_dir / name).exists()
+    ]
+    archive_paths(paths, assume_yes=assume_yes)
 
 
 def main() -> None:
@@ -412,14 +455,19 @@ def main() -> None:
         "--clean-legacy",
         action="store_true",
         help=(
-            "Delete the superseded combined A_readout summary/ranking outputs "
-            "before writing the split A1/A2 outputs"
+            "Archive the superseded combined A_readout summary/ranking outputs "
+            "to AnysoleWorkspace/_trash/<date>/ before writing the split A1/A2 outputs"
         ),
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm the --clean-legacy archive plan without an interactive prompt",
     )
     args = parser.parse_args()
 
     if args.clean_legacy:
-        clean_legacy_outputs(args.output_root)
+        clean_legacy_outputs(args.output_root, assume_yes=args.yes)
 
     study_to_tables = collect_group(args.results_root, args.group_dir)
     write_summary_table(study_to_tables, args.output_root)

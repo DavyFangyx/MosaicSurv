@@ -103,17 +103,19 @@ Test4 消融（或弃用）。Test4 中的全部消融 preset 都与 MosaicSurv 
 生成入口：`gen_Table4_Abaltion_Test_Cindex_Main.sh` → `Table4_Abaltion_Test/gen_ablation_test.sh`；缺失模态入口为 `gen_Table4_Abaltion_Test_Modality_Missing.sh`。
 
 POE 家族降级的 A/B/C 系都在这里做消融。**9 个变体及主模型参照共 10 个 preset 都随 MosaicSurv
-公共超参变化**（它们与主模型的差异只在消融维度本身，公共超参必须一致才是
-公平消融）：
+公共超参变化**（它们与主模型的差异集中在消融维度，公共超参必须一致才能比较；
+No Enumeration 另有 μ/z 实现差异，见下）：
 
 | 组 | preset | 差异维度 | 公共超参 |
 |---|---|---|---|
 | A1 读出头 | `mosaic_surv`（主模型）、`mosaic_surv_single_enum`、`mosaic_surv_multi` | 仅改变读出头 | 全套 10 键 |
-| A2 训练增强 | `mosaic_surv`（主模型）、`mosaic_surv_noenum`、`mosaic_surv_nodropout` | 分别移除子集枚举或模态 dropout | 除 nodropout 的 dropout=0 外保持一致 |
+| A2 训练增强 | `mosaic_surv`（主模型）、`mosaic_surv_noenum`、`mosaic_surv_nodropout` | 分别移除子集枚举或模态 dropout；noenum 另有生存头 μ/z 实现差异 | 除 nodropout 的 dropout=0 外保持一致 |
 | B 训练范式 | `mosaic_surv_twostage`、`mosaic_surv_frozen` | 训练范式 | 全套 10 键 |
 | C 损失项 | `mosaic_surv_kl`、`mosaic_surv_nojeffreys`、`mosaic_surv_detached` | 损失项 | 全套 10 键 |
 
 普通 Single 同时移除 FiLM 和子集枚举，保留历史实现，但不再默认生成或汇总。A组共5个不同模型，完整模态全部10个模型。
+
+No Enumeration 的原实现关闭子集枚举后，生存头输入由后验均值 μ 变为训练前向的采样潜变量 z，因此原始结果不是严格单因素对照；当前实现已统一为 μ，本次重跑结果按修正版报告。
 
 **例外**：`mosaic_surv_nodropout` 的模态 dropout 由 preset 覆盖为0；`mosaic_surv_nojeffreys` 的 conf 中 `POE_BETA_TARGET=0`（由 `_common.bash` 的
 preset 覆盖逻辑写回 0，10 键中其余 9 键与主模型一致）；`mosaic_surv_detached`/`kl`/`noenum`

@@ -292,12 +292,8 @@ class SurvTriPoEVAE(nn.Module):
     def survival_loss_from_cached(self, event_time, censor, loss_fn, avail_real=None, min_batch_for_cox=8):
         cached = self.get_cached_outputs()
         if not self.uses_multi_pattern_surv:
-            # 单因素对照：生存头统一用后验均值 mu（与枚举路径一致），
-            # 采样 z 只用于 VAE 重建，避免关闭枚举时同时改变生存头的输入。
-            risk, fused = self._survival_head(cached["mu_joint"], cached["available_mask"])
-            cached["risk"] = risk
-            cached["fused"] = fused
-            return loss_fn(h=risk, t=event_time, c=censor)
+            # forward 的生存头已按 stage2 规则使用后验均值 μ；z 仅用于 VAE 重建。
+            return loss_fn(h=cached["risk"], t=event_time, c=censor)
         if avail_real is None:
             avail_real = torch.ones_like(cached["available_mask"])
         result = multi_pattern_surv_step(
@@ -354,11 +350,9 @@ class SurvTriPoEVAE(nn.Module):
         return torch.stack(normalized, dim=1)
 
     def _select_latent_for_survival(self, mu_joint, z_joint):
+        # stage1 只训练 VAE；stage2 的生存头统一用后验均值 μ，
+        # 采样 z 仅用于 VAE 重建，避免枚举/noenum 对比伴随 μ/z 差异。
         if self.training_stage == "stage1":
-            return z_joint
-        if self.poe_variant == "A":
-            return mu_joint
-        if self.training:
             return z_joint
         return mu_joint
 

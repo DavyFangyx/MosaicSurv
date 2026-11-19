@@ -1,6 +1,6 @@
 #!/bin/bash
 # bg.sh — 后台启动 scheduler
-# 用法: CUDA_VISIBLE_DEVICES=N bash bg.sh
+# 用法: CUDA_VISIBLE_DEVICES=N [QUEUE_DIR=configs/queue_L1] bash bg.sh
 set -euo pipefail
 
 # Bound native math thread pools; each GPU may have multiple training processes.
@@ -11,9 +11,11 @@ export NUMEXPR_NUM_THREADS=1
 export BLIS_NUM_THREADS=1
 
 if [ "$#" -ne 0 ]; then
-    echo "用法: CUDA_VISIBLE_DEVICES=N bash bg.sh" >&2
+    echo "用法: CUDA_VISIBLE_DEVICES=N [QUEUE_DIR=configs/queue_L1] bash bg.sh" >&2
     exit 1
 fi
+
+QUEUE_DIR="${QUEUE_DIR:-configs/queue}"
 
 GPU_ID="${CUDA_VISIBLE_DEVICES:-}"
 if [[ ! "$GPU_ID" =~ ^[0-9]+$ ]]; then
@@ -38,7 +40,7 @@ done
 
 LOG_FILE="GPU${GPU_ID}_worker${next_worker}.log"
 
-nohup bash scheduler.sh > "$LOG_FILE" 2>&1 &
+nohup bash scheduler.sh "$QUEUE_DIR" > "$LOG_FILE" 2>&1 &
 PID=$!
 
 echo "PID: $PID"

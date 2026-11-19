@@ -44,6 +44,7 @@ _SCRIPT_DIR = str(Path(__file__).resolve().parent)
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
+from archive_utils import archive_existing_artifacts  # noqa: E402
 from Table1_Cindex_Main import (  # noqa: E402
     GROUP_CONFIG,
     STUDY_SPECS,
@@ -191,6 +192,13 @@ def run_experiment(args: argparse.Namespace, project_root: Path, test_dir: str) 
         return
     print(f"[EXP] {test_dir} (layer={layer_dir})")
 
+    # ---- 0. 旧产物保护：先列完整清单；未确认则退出，确认后批量归档
+    archive_existing_artifacts(
+        output_root / group_dir / test_dir,
+        confirm=args.confirm_archive,
+        label=f"Table1_Generate_All/{test_dir}",
+    )
+
     folds = [int(part) for part in args.folds.split(",") if part.strip()]
 
     # ---- 1. cox Breslow 前向缓存
@@ -226,6 +234,7 @@ def run_experiment(args: argparse.Namespace, project_root: Path, test_dir: str) 
         group_dir=group_dir,
         test_dir=test_dir,
         layer_dir=layer_dir,
+        preflight_archive=False,
     )
     print(f"[DONE] {test_dir}")
 
@@ -265,6 +274,15 @@ def main() -> None:
         "--skip-cox",
         action="store_true",
         help="Skip the cox Breslow forward pass (Ours IBS/AUC cells show '-')",
+    )
+    parser.add_argument(
+        "--confirm-archive",
+        action="store_true",
+        help=(
+            "确认把该 test-dir 下已存在的旧 csv/png/pdf 先归档到 "
+            "AnysoleWorkspace/_trash/<date>/ 再生成新结果。"
+            "不传时只列完整清单并退出，不覆盖旧产物。"
+        ),
     )
     parser.add_argument(
         "--cox-cache-dirs",

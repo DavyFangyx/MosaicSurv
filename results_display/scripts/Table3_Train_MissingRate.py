@@ -18,6 +18,10 @@ Default outputs:
 Each CSV is one test subset. Rows are dataset+model. The figure is a 3-column
 grid of the seven subsets, overlaying models by marker/linestyle and datasets by
 color. Cells are 5-fold c-index mean ± std; plotted lines use means only.
+
+旧产物处理：不直接删除。默认先列出 output 目录下所有会被覆盖的 csv/png/pdf 完整
+清单并退出；确认后传 --confirm-archive，将它们移到
+AnysoleWorkspace/_trash/<date>/ 再写新文件。
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ import numpy as np
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MultipleLocator
 
+from archive_utils import archive_existing_artifacts
 from model_names import FORMAL_NAMES, MAIN_MODEL
 
 plt.style.use("seaborn-v0_8-whitegrid")
@@ -752,6 +757,15 @@ def main() -> None:
         action="store_true",
         help="Restore old scan-all behavior (discover every model directory on disk).",
     )
+    parser.add_argument(
+        "--confirm-archive",
+        action="store_true",
+        help=(
+            "确认把已存在的同名 csv/png/pdf 旧产物先归档到 "
+            "AnysoleWorkspace/_trash/<date>/ 再写新文件。"
+            "不传时只列完整清单并退出，不覆盖任何旧文件。"
+        ),
+    )
     args = parser.parse_args()
 
     if args.scan_all:
@@ -768,13 +782,12 @@ def main() -> None:
 
     output_dir = args.output_root / args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
-    for csv_path in output_dir.glob("*.csv"):
-        csv_path.unlink()
-    for png_path in output_dir.glob("*.png"):
-        png_path.unlink()
-    legacy_figure_dir = output_dir / "figures"
-    for png_path in legacy_figure_dir.glob("*.png"):
-        png_path.unlink()
+    # 先列完整清单；未传 --confirm-archive 时只列出并退出，不覆盖旧产物。
+    archive_existing_artifacts(
+        output_dir,
+        confirm=args.confirm_archive,
+        label="Table3_Train_MissingRate",
+    )
 
     if not model_names:
         print("[WARN] No model metrics collected.")

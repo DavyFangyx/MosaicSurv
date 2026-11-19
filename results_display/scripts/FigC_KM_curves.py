@@ -32,6 +32,7 @@ from pathlib import Path
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-figc")
 
+from archive_utils import archive_existing_artifacts, archive_path
 from model_names import display_name as model_display_name, is_main_model
 
 import matplotlib.pyplot as plt
@@ -884,6 +885,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=PROJECT_ROOT / "results_display" / OUTPUT_SERIES,
         help="Output directory under results_display",
     )
+    parser.add_argument(
+        "--confirm-archive",
+        action="store_true",
+        help=(
+            "确认把该 test-dir 下已存在的旧 csv/png/pdf 先归档到 "
+            "AnysoleWorkspace/_trash/<date>/ 再生成新图。"
+            "不传时只列完整清单并退出，不覆盖旧产物。"
+        ),
+    )
     return parser
 
 
@@ -917,8 +927,8 @@ def process_dataset(
     out_dir = output_root / test_dir / study_token
     per_model_dir = out_dir / "per_model"
     per_model_dir.mkdir(parents=True, exist_ok=True)
-    for old_png in per_model_dir.glob("*.png"):
-        old_png.unlink()
+    for old_png in list(per_model_dir.glob("*.png")):
+        archive_path(old_png)
     for result in results:
         plot_per_model(result, per_model_dir, time_unit=time_unit, annotate_hr=annotate_hr)
 
@@ -945,6 +955,13 @@ def main() -> None:
     layer_dir = infer_layer_dir(args.test_dir, experiment_dir)
     if not layer_dir:
         raise SystemExit(f"Cannot infer layer prefix from {experiment_dir}")
+
+    # 旧产物保护：先列完整清单；未确认则退出，确认后批量归档再生成新图。
+    archive_existing_artifacts(
+        args.output_root / args.test_dir,
+        confirm=args.confirm_archive,
+        label=f"FigC_KM_curves/{args.test_dir}",
+    )
 
     study_tokens = resolve_requested_study_tokens(args.dataset, experiment_dir)
     print(f"[PLAN] datasets: {', '.join(study_tokens)}")

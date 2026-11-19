@@ -20,6 +20,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from archive_utils import archive_existing_artifacts, archive_path
 from model_names import display_name as model_display_name
 
 
@@ -150,8 +151,8 @@ def append_rank_suffix(value: str, rank: int) -> str:
 
 def ensure_clean_csv_dir(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-    for csv_path in path.glob("*.csv"):
-        csv_path.unlink()
+    for csv_path in list(path.glob("*.csv")):
+        archive_path(csv_path)
 
 
 def resolve_group_study_dir(
@@ -470,6 +471,8 @@ def collect_experiment(
     test_dir: str,
     layer_dir: str | None = None,
     output_name: str | None = None,
+    preflight_archive: bool = True,
+    confirm_archive: bool = False,
 ) -> None:
     experiment_dir = results_root / group_dir / test_dir
     if layer_dir is None:
@@ -480,6 +483,13 @@ def collect_experiment(
 
     output_name = output_name or test_dir
     print(f"[EXP] {test_dir} -> {output_name} (layer={layer_dir})")
+
+    if preflight_archive:
+        archive_existing_artifacts(
+            output_root / group_dir / output_name,
+            confirm=confirm_archive,
+            label=f"Table1_Cindex_Main/{output_name}",
+        )
 
     baselines_text = collect_group(
         results_root,
@@ -592,6 +602,14 @@ def main() -> None:
         default=None,
         help="Optional experiment folder under the grouped results directory; scans all first-level folders by default",
     )
+    parser.add_argument(
+        "--confirm-archive",
+        action="store_true",
+        help=(
+            "确认把已存在的旧 csv/png/pdf 先归档到 AnysoleWorkspace/_trash/<date>/ "
+            "再生成新结果。不传时只列完整清单并退出。"
+        ),
+    )
     args = parser.parse_args()
 
     if args.test_dir is not None:
@@ -601,6 +619,7 @@ def main() -> None:
             group_dir=args.group_dir,
             test_dir=args.test_dir,
             layer_dir=args.layer_dir,
+            confirm_archive=args.confirm_archive,
         )
         print("Done.")
         return
@@ -617,6 +636,7 @@ def main() -> None:
             group_dir=args.group_dir,
             test_dir=experiment_dir.name,
             layer_dir=args.layer_dir,
+            confirm_archive=args.confirm_archive,
         )
     print("Done.")
 
